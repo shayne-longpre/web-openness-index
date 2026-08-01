@@ -4,7 +4,7 @@ import httpx
 import pytest
 
 from web_openness.config import ScanConfig
-from web_openness.models import Confidence
+from web_openness.models import Confidence, Observation
 from web_openness.pipeline import Scanner, normalize_target
 from web_openness.probes import (
     HomepageProbe,
@@ -13,6 +13,8 @@ from web_openness.probes import (
     SitemapProbe,
     WellKnownProbe,
 )
+from web_openness.probes.base import ProbeContext
+from web_openness.safety import URLSafetyError
 from web_openness.storage import write_snapshot
 
 OFFLINE_HTTP_PROBES = (
@@ -30,6 +32,27 @@ def test_normalize_target() -> None:
         "example.org",
         "http://example.org:8080",
     )
+
+
+@pytest.mark.asyncio
+async def test_scanner_rejects_local_target_before_running_probes() -> None:
+    class ExplodingProbe:
+        name = "must_not_run"
+
+        async def collect(self, _context: ProbeContext) -> dict[str, Observation]:
+            raise AssertionError("probe ran before destination validation")
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise AssertionError(f"HTTP request reached transport: {request.url}")
+
+    scanner = Scanner(
+        ScanConfig(request_delay_seconds=0),
+        probes=(ExplodingProbe(),),
+        transport=httpx.MockTransport(handler),
+    )
+
+    with pytest.raises(URLSafetyError):
+        await scanner.scan("localhost")
 
 
 @pytest.mark.asyncio
@@ -82,12 +105,14 @@ async def test_scan_collects_evidence_without_live_network(tmp_path: Path) -> No
     assert snapshot.errors == []
     assert snapshot.observations["crawler.robots_exists"].value is True
     assert snapshot.observations["crawler.ai_specific_user_agents"].value == ["gptbot"]
+    assert snapshot.observations["crawler.ai_homepage_policies"].value["gptbot"] is False
+    assert snapshot.observations["crawler.ai_homepage_policies"].value["ccbot"] is True
     assert snapshot.observations["human.homepage_accessible"].value is True
     assert snapshot.observations["metadata.sitemap_exists"].value is True
     assert snapshot.observations["metadata.sitemap_url_count"].value == 1
     assert snapshot.observations["metadata.json_ld"].value is True
     assert snapshot.observations["metadata.open_graph"].value is True
-    assert snapshot.observations["metadata.feeds"].value == ["/feed.xml"]
+    assert snapshot.observations["metadata.feeds"].value == ["https://example.org/feed.xml"]
     assert snapshot.observations["metadata.llms_txt_exists"].value is True
 
     path = write_snapshot(snapshot, tmp_path)
@@ -132,3 +157,53 @@ async def test_inconclusive_robots_status_fails_closed() -> None:
     assert snapshot.request_count == 1
     assert snapshot.observations["crawler.robots_exists"].value is None
     assert snapshot.observations["human.homepage_accessible"].value is None
+
+
+@pytest.mark.asyncio
+async def test_missing_robots_records_unrestricted_policy() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/robots.txt"
+        return httpx.Response(404, request=request)
+
+    scanner = Scanner(
+        ScanConfig(request_delay_seconds=0),
+        probes=(RobotsProbe(),),
+        transport=httpx.MockTransport(handler),
+    )
+    snapshot = await scanner.scan("example.org")
+
+    assert snapshot.observations["crawler.homepage_policy_allowed"].value is True
+    policies = snapshot.observations["crawler.ai_homepage_policies"].value
+    assert policies["gptbot"] is True
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("status", "content_type"),
+    [(403, "text/html"), (200, "application/json")],
+)
+async def test_metadata_skips_error_pages_and_non_html(
+    status: int,
+    content_type: str,
+) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/robots.txt":
+            return httpx.Response(404, request=request)
+        if request.url.path == "/":
+            return httpx.Response(
+                status,
+                headers={"content-type": content_type},
+                text='<a href="/graphql">not homepage metadata</a>',
+                request=request,
+            )
+        raise AssertionError(f"unexpected request: {request.url}")
+
+    scanner = Scanner(
+        ScanConfig(request_delay_seconds=0),
+        probes=(RobotsProbe(), HomepageProbe(), MetadataProbe()),
+        transport=httpx.MockTransport(handler),
+    )
+    snapshot = await scanner.scan("example.org")
+
+    assert snapshot.observations["agent.interface_links"].value is None
+    assert snapshot.observations["metadata.html_title"].value is None

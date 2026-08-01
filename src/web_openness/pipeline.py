@@ -8,22 +8,26 @@ import httpx
 from web_openness import __version__
 from web_openness.client import RequestBudgetExceeded, SiteClient
 from web_openness.config import ScanConfig
+from web_openness.domains import canonical_hostname
 from web_openness.models import DomainSnapshot, Observation, ProbeError
 from web_openness.probes import (
     HomepageProbe,
     MetadataProbe,
     NetworkProbe,
+    ResponseProbe,
     RobotsProbe,
     SitemapProbe,
     WellKnownProbe,
 )
 from web_openness.probes.base import Probe, ProbeContext
+from web_openness.safety import validate_public_url
 
 DEFAULT_PROBES: tuple[Probe, ...] = (
     NetworkProbe(),
     RobotsProbe(),
     SitemapProbe(),
     HomepageProbe(),
+    ResponseProbe(),
     MetadataProbe(),
     WellKnownProbe(),
 )
@@ -43,9 +47,7 @@ def normalize_target(target: str) -> tuple[str, str]:
     if parsed.username is not None or parsed.password is not None:
         raise ValueError("target must not include credentials")
 
-    hostname = parsed.hostname.rstrip(".").lower()
-    if not hostname:
-        raise ValueError("target hostname must not be empty")
+    hostname = canonical_hostname(parsed.hostname)
     host = f"[{hostname}]" if ":" in hostname else hostname
     if parsed.port is not None:
         host = f"{host}:{parsed.port}"
@@ -67,6 +69,10 @@ class Scanner:
 
     async def scan(self, target: str) -> DomainSnapshot:
         domain, origin = normalize_target(target)
+        await validate_public_url(
+            origin,
+            resolve_dns=not isinstance(self.transport, httpx.MockTransport),
+        )
         started_at = datetime.now(UTC)
         observations: dict[str, Observation] = {}
 

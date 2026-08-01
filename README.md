@@ -38,8 +38,11 @@ This repository contains the first collector skeleton and the infrastructure pla
 - obeys applicable `robots.txt` rules before requesting other paths;
 - discovers and safely classifies one sitemap without recursively crawling it;
 - records homepage availability and response metadata;
-- detects basic structured metadata in the homepage HTML;
+- records HTTP protocol, cache/security headers, and conservative CDN hints;
+- detects structured metadata, canonical/feed/manifest/OpenSearch links, and candidate public
+  interface links in the homepage HTML;
 - checks for a public `llms.txt` when policy allows;
+- rejects local, private, reserved, and otherwise non-public network destinations;
 - emits a versioned JSON snapshot with evidence, confidence, request records, and errors;
 - enforces a per-domain request budget and delay.
 
@@ -67,6 +70,17 @@ make check
 ```
 
 The tests use deterministic mock HTTP responses and do not contact live websites.
+
+To run the small diagnostic canary and produce a JSON plus Markdown coverage report:
+
+```bash
+uv run web-openness smoke \
+  --domains-file examples/smoke_domains.txt \
+  --concurrency 3
+```
+
+This is an operational smoke test, not a research sample or ranking. See
+[docs/smoke_test.md](docs/smoke_test.md) for its outputs and interpretation.
 
 ## Measurement workflow
 

@@ -14,6 +14,7 @@ build/
 
 # Runtime output
 data/snapshots/
+data/smoke-runs/
 
 # Local source brief; README.md is the repository-facing specification.
 Web Openness Observatory.docx

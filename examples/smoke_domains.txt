@@ -1,0 +1,6 @@
+# Small, intentionally explicit diagnostic set. This is not a research sample.
+example.com
+wikipedia.org
+mit.edu
+github.com
+data.gov

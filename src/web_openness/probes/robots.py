@@ -1,6 +1,7 @@
-import urllib.robotparser
 from dataclasses import dataclass
 from urllib.parse import urljoin
+
+from protego import Protego
 
 from web_openness.models import Confidence, Observation, ProbeError
 from web_openness.probes.base import ProbeContext, evidence_from_fetch, observation
@@ -26,46 +27,41 @@ class ParsedRobots:
     ai_user_agents: tuple[str, ...]
     crawl_delays: dict[str, str]
     sitemaps: tuple[str, ...]
+    policy: Protego
+
+
+def _declared_user_agents(text: str) -> set[str]:
+    """Extract declaration names for evidence; Protego owns policy evaluation."""
+
+    user_agents: set[str] = set()
+    for raw_line in text.splitlines():
+        line = raw_line.split("#", maxsplit=1)[0].strip()
+        key, separator, value = line.partition(":")
+        if separator and key.strip().lower() == "user-agent" and value.strip():
+            user_agents.add(value.strip().lower())
+    return user_agents
+
+
+def _format_crawl_delay(delay: float) -> str:
+    return f"{delay:g}"
 
 
 def parse_robots(text: str) -> ParsedRobots:
-    user_agents: set[str] = set()
-    crawl_delays: dict[str, str] = {}
-    sitemaps: set[str] = set()
-    current_agents: list[str] = []
-    group_has_rules = False
-
-    for raw_line in text.splitlines():
-        line = raw_line.split("#", maxsplit=1)[0].strip()
-        if not line:
-            continue
-        key, separator, value = line.partition(":")
-        if not separator:
-            continue
-        key = key.strip().lower()
-        value = value.strip()
-        if key == "user-agent":
-            if group_has_rules:
-                current_agents = []
-                group_has_rules = False
-            normalized = value.lower()
-            current_agents.append(normalized)
-            user_agents.add(normalized)
-        elif key == "crawl-delay":
-            group_has_rules = True
-            for agent in current_agents or ["*"]:
-                crawl_delays[agent] = value
-        elif key in {"allow", "disallow"}:
-            group_has_rules = True
-        elif key == "sitemap" and value:
-            sitemaps.add(value)
+    policy = Protego.parse(text)
+    user_agents = _declared_user_agents(text)
+    crawl_delays = {
+        agent: _format_crawl_delay(delay)
+        for agent in user_agents
+        if (delay := policy.crawl_delay(agent)) is not None
+    }
 
     ai_user_agents = tuple(sorted(user_agents & KNOWN_AI_AGENTS))
     return ParsedRobots(
         user_agents=tuple(sorted(user_agents)),
         ai_user_agents=ai_user_agents,
         crawl_delays=dict(sorted(crawl_delays.items())),
-        sitemaps=tuple(sorted(sitemaps)),
+        sitemaps=tuple(sorted(set(policy.sitemaps))),
+        policy=policy,
     )
 
 
@@ -108,6 +104,20 @@ class RobotsProbe:
                     method="HTTP status",
                     evidence=evidence,
                 ),
+                "crawler.ai_homepage_policies": observation(
+                    dict.fromkeys(sorted(KNOWN_AI_AGENTS), True),
+                    confidence=Confidence.CONFIRMED,
+                    score=1.0,
+                    method="no robots.txt restrictions were present",
+                    evidence=evidence,
+                ),
+                "crawler.homepage_policy_allowed": observation(
+                    True,
+                    confidence=Confidence.CONFIRMED,
+                    score=1.0,
+                    method="no robots.txt restrictions were present",
+                    evidence=evidence,
+                ),
             }
 
         if status != 200:
@@ -130,12 +140,12 @@ class RobotsProbe:
             }
 
         parsed = parse_robots(result.text)
-        parser = urllib.robotparser.RobotFileParser()
-        parser.set_url(url)
-        parser.parse(result.text.splitlines())
         homepage_url = urljoin(f"{context.origin}/", "/")
-        allows_homepage = parser.can_fetch(context.config.user_agent_token, homepage_url)
-        context.shared["robot_parser"] = parser
+        allows_homepage = parsed.policy.can_fetch(homepage_url, context.config.user_agent_token)
+        ai_homepage_policies = {
+            agent: parsed.policy.can_fetch(homepage_url, agent) for agent in sorted(KNOWN_AI_AGENTS)
+        }
+        context.shared["robots_policy"] = parsed.policy
         context.shared["robots_allows_followup"] = allows_homepage
         context.shared["robots_sitemaps"] = list(parsed.sitemaps)
 
@@ -168,6 +178,13 @@ class RobotsProbe:
                 method="robots.txt user-agent matching",
                 evidence=evidence,
             ),
+            "crawler.ai_homepage_policies": observation(
+                ai_homepage_policies,
+                confidence=Confidence.CONFIRMED,
+                score=1.0,
+                method="robots.txt evaluation for known AI crawler user agents",
+                evidence=evidence,
+            ),
             "crawler.crawl_delays": observation(
                 parsed.crawl_delays,
                 confidence=Confidence.CONFIRMED,
@@ -190,3 +207,10 @@ class RobotsProbe:
                 evidence=evidence,
             ),
         }
+
+
+def policy_allows(context: ProbeContext, url: str) -> bool:
+    policy = context.shared.get("robots_policy")
+    if isinstance(policy, Protego):
+        return policy.can_fetch(url, context.config.user_agent_token)
+    return context.shared.get("robots_allows_followup") is True

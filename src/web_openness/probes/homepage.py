@@ -21,6 +21,7 @@ class HomepageProbe:
 
         url = urljoin(f"{context.origin}/", "/")
         result = await context.client.get(url)
+        context.shared["homepage_response"] = result
         evidence = [evidence_from_fetch(result)]
         if result.error is not None:
             context.errors.append(ProbeError(probe=self.name, message=result.error))
@@ -36,8 +37,14 @@ class HomepageProbe:
 
         status = result.status_code
         accessible = status is not None and 200 <= status < 400
-        context.shared["homepage_html"] = result.text
         context.shared["homepage_evidence"] = evidence[0]
+        content_type = result.headers.get("content-type", "").lower()
+        if (
+            status is not None
+            and 200 <= status < 300
+            and ("text/html" in content_type or "application/xhtml+xml" in content_type)
+        ):
+            context.shared["homepage_html"] = result.text
 
         return {
             "human.homepage_accessible": observation(

@@ -9,8 +9,10 @@ description = "Reproducible measurement of access to the public web"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
-  "httpx>=0.28,<1",
+  "httpx[http2]>=0.28,<1",
+  "protego>=0.6.2,<1",
   "pydantic>=2.11,<3",
+  "tldextract>=5.3.1,<6",
 ]
 
 [project.scripts]

@@ -1,10 +1,10 @@
-import urllib.robotparser
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 from urllib.parse import urljoin, urlsplit
 
 from web_openness.models import Confidence, Evidence, Observation, ProbeError
 from web_openness.probes.base import ProbeContext, evidence_from_fetch, observation
+from web_openness.probes.robots import policy_allows
 
 MAX_SITEMAP_XML_BYTES = 1_000_000
 
@@ -90,13 +90,6 @@ def _is_safe_http_url(url: str) -> bool:
     )
 
 
-def _policy_allows(context: ProbeContext, url: str) -> bool:
-    parser_value = context.shared.get("robot_parser")
-    if isinstance(parser_value, urllib.robotparser.RobotFileParser):
-        return parser_value.can_fetch(context.config.user_agent_token, url)
-    return context.shared.get("robots_allows_followup") is True
-
-
 def _unknown_fields(
     *,
     method: str,
@@ -154,7 +147,7 @@ class SitemapProbe:
             context.errors.append(ProbeError(probe=self.name, message=message))
             return _unknown_fields(method=message)
 
-        if not _policy_allows(context, url):
+        if not policy_allows(context, url):
             return _unknown_fields(
                 method="skipped because crawler policy was not affirmatively allowed"
             )
