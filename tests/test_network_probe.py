@@ -4,7 +4,7 @@ import pytest
 
 from web_openness.client import SiteClient
 from web_openness.config import ScanConfig
-from web_openness.models import Confidence
+from web_openness.models import Confidence, ObservationOutcome
 from web_openness.probes.base import ProbeContext
 from web_openness.probes.network import (
     MAX_CERTIFICATE_FIELD_CHARS,
@@ -131,6 +131,7 @@ async def test_failures_are_unknown_and_record_both_errors() -> None:
     assert observations["network.dns_resolved"].confidence == Confidence.UNKNOWN
     assert observations["network.tls_handshake"].value is None
     assert observations["network.tls_handshake"].confidence == Confidence.UNKNOWN
+    assert observations["network.tls_handshake"].outcome == ObservationOutcome.SKIPPED
     assert observations["network.tls_handshake"].method == (
         "not inspected because DNS was not confirmed globally routable"
     )
@@ -149,6 +150,7 @@ async def test_http_origin_skips_tls_without_reporting_failure() -> None:
     assert context.errors == []
     assert observations["network.tls_handshake"].value is None
     assert observations["network.tls_handshake"].confidence == Confidence.UNKNOWN
+    assert observations["network.tls_handshake"].outcome == ObservationOutcome.SKIPPED
     assert observations["network.tls_handshake"].method == (
         "not inspected because the origin is not HTTPS"
     )
@@ -173,7 +175,8 @@ async def test_missing_tls_fields_remain_unknown_and_strings_are_bounded() -> No
     assert observations["network.dns_resolved"].value is True
     assert observations["network.dns_resolved"].confidence == Confidence.CONFIRMED
     assert observations["network.tls_cipher"].value is None
-    assert observations["network.tls_cipher"].confidence == Confidence.UNKNOWN
+    assert observations["network.tls_cipher"].confidence == Confidence.NO_EVIDENCE
+    assert observations["network.tls_cipher"].outcome == ObservationOutcome.NO_EVIDENCE
     assert len(observations["network.tls_certificate_issuer"].value) == (
         MAX_CERTIFICATE_FIELD_CHARS
     )

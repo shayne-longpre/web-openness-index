@@ -7,7 +7,13 @@ from uuid import uuid4
 import pytest
 
 from web_openness.config import ScanConfig
-from web_openness.models import Confidence, DomainSnapshot, Observation, ProbeError
+from web_openness.models import (
+    Confidence,
+    DomainSnapshot,
+    Observation,
+    ObservationOutcome,
+    ProbeError,
+)
 from web_openness.smoke import (
     SignalStatus,
     collect_smoke_run,
@@ -21,10 +27,12 @@ def _observation(
     value: object,
     *,
     confidence: Confidence = Confidence.CONFIRMED,
+    outcome: ObservationOutcome = ObservationOutcome.OBSERVED,
     method: str = "offline fixture",
 ) -> Observation:
     return Observation(
         value=value,
+        outcome=outcome,
         confidence=confidence,
         confidence_score=1.0 if confidence == Confidence.CONFIRMED else 0.0,
         method=method,
@@ -46,11 +54,13 @@ def _snapshot(domain: str) -> DomainSnapshot:
             "human.homepage_accessible": _observation(
                 None,
                 confidence=Confidence.UNKNOWN,
-                method="homepage fetch failed",
+                outcome=ObservationOutcome.ERROR,
+                method="opaque fixture state",
             ),
             "metadata.llms_txt_exists": _observation(
                 None,
                 confidence=Confidence.NO_EVIDENCE,
+                outcome=ObservationOutcome.NO_EVIDENCE,
                 method="public file was not observed",
             ),
         },
@@ -89,9 +99,11 @@ async def test_smoke_run_is_bounded_and_writes_individual_snapshots(tmp_path: Pa
     assert all(Path(domain.snapshot_path or "").exists() for domain in run.domains)
     first = run.domains[0]
     assert first.signals["crawler.robots_exists"].status == SignalStatus.COLLECTED
-    assert first.signals["human.homepage_accessible"].status == SignalStatus.NO_EVIDENCE
+    assert first.signals["human.homepage_accessible"].status == SignalStatus.ERROR
     assert first.signals["metadata.llms_txt_exists"].status == SignalStatus.NO_EVIDENCE
-    assert first.signals["infrastructure.cdn"].status == SignalStatus.NOT_YET_SUPPORTED
+    assert first.signals["infrastructure.cdn"].status == SignalStatus.SKIPPED
+    assert first.signals["preservation.cache_header_hints"].status == SignalStatus.SKIPPED
+    assert first.signals["preservation.cache_behavior"].status == (SignalStatus.NOT_YET_SUPPORTED)
 
 
 @pytest.mark.asyncio
@@ -111,7 +123,8 @@ async def test_smoke_run_preserves_top_level_failure(tmp_path: Path) -> None:
     assert result.snapshot_path is None
     assert result.errors == ("ValueError: bad target",)
     assert result.signals["crawler.robots_exists"].status == SignalStatus.ERROR
-    assert result.signals["agent.mcp"].status == SignalStatus.NOT_YET_SUPPORTED
+    assert result.signals["agent.mcp"].status == SignalStatus.ERROR
+    assert result.signals["human.paywall_detected"].status == (SignalStatus.NOT_YET_SUPPORTED)
 
 
 def test_reports_are_machine_readable_and_human_readable(tmp_path: Path) -> None:
@@ -129,7 +142,7 @@ def test_reports_are_machine_readable_and_human_readable(tmp_path: Path) -> None
     markdown = markdown_path.read_text(encoding="utf-8")
 
     assert run.completed_at.date().isoformat() in str(json_path)
-    assert payload["report_version"] == "0.1.0"
+    assert payload["report_version"] == "0.2.0"
     assert payload["run_id"] == run.run_id
     assert payload["domain_count"] == 1
     assert payload["request_count"] == 2

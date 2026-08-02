@@ -9,16 +9,17 @@ from pathlib import Path
 from uuid import uuid4
 
 from web_openness.config import ScanConfig
-from web_openness.models import Confidence, DomainSnapshot, Observation
+from web_openness.models import DomainSnapshot, Observation, ObservationOutcome
 from web_openness.pipeline import Scanner
 from web_openness.storage import write_snapshot
 
-SMOKE_REPORT_VERSION = "0.1.0"
+SMOKE_REPORT_VERSION = "0.2.0"
 
 
 class SignalStatus(StrEnum):
     COLLECTED = "collected"
     NO_EVIDENCE = "no_evidence"
+    SKIPPED = "skipped"
     ERROR = "error"
     NOT_YET_SUPPORTED = "not_yet_supported"
 
@@ -52,6 +53,7 @@ SIGNAL_CATALOG: tuple[SignalSpec, ...] = tuple(
         "infrastructure.security_headers",
         "infrastructure.cache_headers",
         "infrastructure.cdn_hints",
+        "infrastructure.cdn",
         "crawler.robots_exists",
         "crawler.robots_status",
         "crawler.user_agents",
@@ -66,7 +68,9 @@ SIGNAL_CATALOG: tuple[SignalSpec, ...] = tuple(
         "human.homepage_content_type",
         "human.http_access_disposition",
         "human.authentication_challenge",
+        "human.login_required",
         "human.rate_limited",
+        "preservation.cache_header_hints",
         "metadata.sitemap_exists",
         "metadata.sitemap_status",
         "metadata.sitemap_document_type",
@@ -83,28 +87,31 @@ SIGNAL_CATALOG: tuple[SignalSpec, ...] = tuple(
         "metadata.web_manifest_url",
         "metadata.opensearch_url",
         "agent.interface_links",
-        "metadata.llms_txt_exists",
-        "metadata.llms_txt_status",
-    )
-) + tuple(
-    SignalSpec(key, False)
-    for key in (
-        "infrastructure.cdn",
-        "infrastructure.waf",
-        "infrastructure.dns_provider",
-        "infrastructure.hosting_provider",
-        "human.login_required",
-        "human.paywall_detected",
-        "human.cookie_wall_detected",
-        "human.captcha_detected",
-        "human.javascript_required",
-        "crawler.browser_http_difference",
         "agent.openapi",
         "agent.graphql",
         "agent.oauth_metadata",
         "agent.mcp",
         "agent.a2a",
         "agent.agent_card",
+        "agent.api_documentation",
+        "legal.policy_links",
+        "legal.license_links",
+        "economic.pricing_links",
+        "economic.registration_links",
+        "metadata.llms_txt_exists",
+        "metadata.llms_txt_status",
+    )
+) + tuple(
+    SignalSpec(key, False)
+    for key in (
+        "infrastructure.waf",
+        "infrastructure.dns_provider",
+        "infrastructure.hosting_provider",
+        "human.paywall_detected",
+        "human.cookie_wall_detected",
+        "human.captcha_detected",
+        "human.javascript_required",
+        "crawler.browser_http_difference",
         "legal.scraping_restrictions",
         "legal.ai_restrictions",
         "legal.license",
@@ -201,6 +208,9 @@ async def collect_smoke_run(
         raise ValueError("concurrency must be at least 1")
 
     scanner = Scanner(config)
+    if scanner.cease_list.domains:
+        for target in normalized_targets:
+            scanner.require_target_allowed(target)
     scan_target = scan or scanner.scan
     semaphore = asyncio.Semaphore(concurrency)
     started_at = datetime.now(UTC)
@@ -263,8 +273,9 @@ def render_markdown(run: SmokeRun) -> str:
         "",
         "## Domain results",
         "",
-        "| Domain | Requests | Collected | No evidence | Signal errors | Scan notes | Snapshot |",
-        "| --- | ---: | ---: | ---: | ---: | --- | --- |",
+        "| Domain | Requests | Collected | No evidence | Skipped | Signal errors | "
+        "Scan notes | Snapshot |",
+        "| --- | ---: | ---: | ---: | ---: | ---: | --- | --- |",
     ]
     for domain in run.domains:
         domain_counts = Counter(signal.status for signal in domain.signals.values())
@@ -274,6 +285,7 @@ def render_markdown(run: SmokeRun) -> str:
             f"| {label} | {domain.request_count} | "
             f"{domain_counts[SignalStatus.COLLECTED]} | "
             f"{domain_counts[SignalStatus.NO_EVIDENCE]} | "
+            f"{domain_counts[SignalStatus.SKIPPED]} | "
             f"{domain_counts[SignalStatus.ERROR]} | {_display_errors(domain.errors)} | "
             f"{snapshot} |"
         )
@@ -316,6 +328,7 @@ def render_markdown(run: SmokeRun) -> str:
         lines.append(f"| {status.value} | {counts[status]} |")
 
     no_evidence = _key_status_counts(run, SignalStatus.NO_EVIDENCE)
+    skipped = _key_status_counts(run, SignalStatus.SKIPPED)
     errors = _key_status_counts(run, SignalStatus.ERROR)
     unsupported = _key_status_counts(run, SignalStatus.NOT_YET_SUPPORTED)
     lines.extend(
@@ -324,6 +337,7 @@ def render_markdown(run: SmokeRun) -> str:
             "## Diagnostic gaps",
             "",
             f"- No evidence: {_format_key_counts(no_evidence, len(run.domains))}",
+            f"- Skipped: {_format_key_counts(skipped, len(run.domains))}",
             f"- Errors: {_format_key_counts(errors, len(run.domains))}",
             f"- Not yet supported: {_format_key_counts(unsupported, len(run.domains))}",
             "",
@@ -342,7 +356,7 @@ def _domain_result(target: str, snapshot: DomainSnapshot, path: Path) -> DomainR
         if observation is not None:
             signals[key] = _classify_observation(observation)
         elif specs[key].implemented:
-            signals[key] = SignalResult(SignalStatus.NO_EVIDENCE)
+            signals[key] = SignalResult(SignalStatus.SKIPPED)
         else:
             signals[key] = SignalResult(SignalStatus.NOT_YET_SUPPORTED)
 
@@ -357,11 +371,12 @@ def _domain_result(target: str, snapshot: DomainSnapshot, path: Path) -> DomainR
 
 
 def _classify_observation(observation: Observation) -> SignalResult:
-    if observation.confidence in {Confidence.NO_EVIDENCE, Confidence.UNKNOWN}:
-        status = SignalStatus.NO_EVIDENCE
-    else:
-        # False and empty values are valid negative observations, not missing evidence.
-        status = SignalStatus.COLLECTED
+    status = {
+        ObservationOutcome.OBSERVED: SignalStatus.COLLECTED,
+        ObservationOutcome.NO_EVIDENCE: SignalStatus.NO_EVIDENCE,
+        ObservationOutcome.SKIPPED: SignalStatus.SKIPPED,
+        ObservationOutcome.ERROR: SignalStatus.ERROR,
+    }[observation.outcome]
     return SignalResult(status=status, value=observation.value, method=observation.method)
 
 

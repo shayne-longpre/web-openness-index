@@ -2,7 +2,7 @@ import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 from urllib.parse import urljoin, urlsplit
 
-from web_openness.models import Confidence, Evidence, Observation, ProbeError
+from web_openness.models import Confidence, Evidence, Observation, ObservationOutcome, ProbeError
 from web_openness.probes.base import ProbeContext, evidence_from_fetch, observation
 from web_openness.probes.robots import policy_allows
 
@@ -95,16 +95,21 @@ def _unknown_fields(
     method: str,
     evidence: list[Evidence] | None = None,
     status: int | None = None,
+    outcome: ObservationOutcome = ObservationOutcome.ERROR,
 ) -> dict[str, Observation]:
     status_confidence = Confidence.CONFIRMED if status is not None else Confidence.UNKNOWN
     status_score = 1.0 if status is not None else 0.0
+    unknown_confidence = (
+        Confidence.NO_EVIDENCE if outcome == ObservationOutcome.NO_EVIDENCE else Confidence.UNKNOWN
+    )
     return {
         EXISTS_KEY: observation(
             None,
-            confidence=Confidence.UNKNOWN,
+            confidence=unknown_confidence,
             score=0.0,
             method=method,
             evidence=evidence,
+            outcome=outcome,
         ),
         STATUS_KEY: observation(
             status,
@@ -112,27 +117,31 @@ def _unknown_fields(
             score=status_score,
             method="HTTP status" if status is not None else method,
             evidence=evidence,
+            outcome=ObservationOutcome.OBSERVED if status is not None else outcome,
         ),
         DOCUMENT_TYPE_KEY: observation(
             None,
-            confidence=Confidence.UNKNOWN,
+            confidence=unknown_confidence,
             score=0.0,
             method=method,
             evidence=evidence,
+            outcome=outcome,
         ),
         URL_COUNT_KEY: observation(
             None,
-            confidence=Confidence.UNKNOWN,
+            confidence=unknown_confidence,
             score=0.0,
             method=method,
             evidence=evidence,
+            outcome=outcome,
         ),
         CHILD_SITEMAP_COUNT_KEY: observation(
             None,
-            confidence=Confidence.UNKNOWN,
+            confidence=unknown_confidence,
             score=0.0,
             method=method,
             evidence=evidence,
+            outcome=outcome,
         ),
     }
 
@@ -149,7 +158,8 @@ class SitemapProbe:
 
         if not policy_allows(context, url):
             return _unknown_fields(
-                method="skipped because crawler policy was not affirmatively allowed"
+                method="skipped because crawler policy was not affirmatively allowed",
+                outcome=ObservationOutcome.SKIPPED,
             )
 
         result = await context.client.get(url)
@@ -164,6 +174,7 @@ class SitemapProbe:
                 method="sitemap returned a not-found status",
                 evidence=evidence,
                 status=status,
+                outcome=ObservationOutcome.NO_EVIDENCE,
             )
             fields[EXISTS_KEY] = observation(
                 False,
@@ -179,6 +190,7 @@ class SitemapProbe:
                 method="sitemap returned an inconclusive status",
                 evidence=evidence,
                 status=status,
+                outcome=ObservationOutcome.NO_EVIDENCE,
             )
 
         if result.truncated:

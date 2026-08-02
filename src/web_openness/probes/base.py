@@ -4,7 +4,13 @@ from typing import Protocol
 
 from web_openness.client import FetchResult, SiteClient
 from web_openness.config import ScanConfig
-from web_openness.models import Confidence, Evidence, Observation, ProbeError
+from web_openness.models import (
+    Confidence,
+    Evidence,
+    Observation,
+    ObservationOutcome,
+    ProbeError,
+)
 
 
 @dataclass(slots=True)
@@ -40,9 +46,18 @@ def observation(
     score: float,
     method: str,
     evidence: list[Evidence] | None = None,
+    outcome: ObservationOutcome | None = None,
 ) -> Observation:
+    if outcome is None:
+        if confidence == Confidence.NO_EVIDENCE:
+            outcome = ObservationOutcome.NO_EVIDENCE
+        elif confidence == Confidence.UNKNOWN:
+            outcome = ObservationOutcome.ERROR
+        else:
+            outcome = ObservationOutcome.OBSERVED
     return Observation(
         value=value,
+        outcome=outcome,
         confidence=confidence,
         confidence_score=score,
         method=method,

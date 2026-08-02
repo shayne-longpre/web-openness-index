@@ -4,7 +4,7 @@ import pytest
 
 from web_openness.client import FetchResult, SiteClient
 from web_openness.config import ScanConfig
-from web_openness.models import Confidence, Evidence, RequestRecord
+from web_openness.models import Confidence, Evidence, ObservationOutcome, RequestRecord
 from web_openness.probes.base import ProbeContext
 from web_openness.probes.metadata import MetadataProbe
 
@@ -62,7 +62,12 @@ async def test_extracts_bounded_metadata_and_interface_candidates() -> None:
       <meta name="generator" content="Lean CMS">
       <meta property="og:title" content="Example">
       <script type="application/ld+json">{"@type": ["WebSite", "Organization"]}</script>
-    </head><body><a href="/graphql">GraphQL</a><svg><title>Icon</title></svg></body></html>
+    </head><body>
+      <a href="/graphql">GraphQL</a>
+      <a href="/legal/terms">Terms of use</a>
+      <a href="/pricing">Plans</a>
+      <svg><title>Icon</title></svg>
+    </body></html>
     """
 
     values = await MetadataProbe().collect(_context(html))
@@ -80,6 +85,15 @@ async def test_extracts_bounded_metadata_and_interface_candidates() -> None:
         "https://www.example.org/graphql",
     ]
     assert values["agent.interface_links"].confidence == Confidence.POSSIBLE
+    assert values["agent.openapi"].value == ["https://www.example.org/openapi.json"]
+    assert values["agent.graphql"].value == ["https://www.example.org/graphql"]
+    assert values["agent.mcp"].confidence == Confidence.NO_EVIDENCE
+    assert values["legal.policy_links"].value == [
+        {"url": "https://www.example.org/legal/terms", "text": "Terms of use"}
+    ]
+    assert values["economic.pricing_links"].value == [
+        {"url": "https://www.example.org/pricing", "text": "Plans"}
+    ]
 
 
 @pytest.mark.asyncio
@@ -91,4 +105,26 @@ async def test_malformed_json_ld_is_unknown_without_breaking_other_metadata() ->
     assert values["metadata.json_ld"].value is True
     assert values["metadata.json_ld_types"].value == []
     assert values["metadata.json_ld_types"].confidence == Confidence.UNKNOWN
+    assert values["metadata.json_ld_types"].outcome == ObservationOutcome.ERROR
     assert values["metadata.feeds"].confidence == Confidence.NO_EVIDENCE
+
+
+@pytest.mark.asyncio
+async def test_discovery_markers_match_tokens_not_substrings() -> None:
+    values = await MetadataProbe().collect(
+        _context('<html><body><a href="/photos">Photos</a></body></html>')
+    )
+
+    assert values["legal.policy_links"].value == []
+
+
+@pytest.mark.asyncio
+async def test_discovery_cap_applies_after_candidate_filtering() -> None:
+    filler = "".join(f'<a href="/article/{index}">Article {index}</a>' for index in range(60))
+    html = f'<html><body>{filler}<a href="/terms">Terms of use</a></body></html>'
+
+    values = await MetadataProbe().collect(_context(html))
+
+    assert values["legal.policy_links"].value == [
+        {"url": "https://www.example.org/terms", "text": "Terms of use"}
+    ]

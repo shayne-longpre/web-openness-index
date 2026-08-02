@@ -8,7 +8,7 @@ from datetime import UTC, datetime
 from typing import Protocol
 from urllib.parse import urlsplit
 
-from web_openness.models import Confidence, Evidence, Observation, ProbeError
+from web_openness.models import Confidence, Evidence, Observation, ObservationOutcome, ProbeError
 from web_openness.probes.base import ProbeContext, observation
 from web_openness.safety import URLSafetyError, require_public_address
 
@@ -139,7 +139,10 @@ class NetworkProbe:
         observations = await self._collect_dns(context, hostname, port)
         if parsed.scheme == "https" and context.shared.get("network_destination_safe") is not True:
             observations.update(
-                _unknown_tls("not inspected because DNS was not confirmed globally routable")
+                _unknown_tls(
+                    "not inspected because DNS was not confirmed globally routable",
+                    outcome=ObservationOutcome.SKIPPED,
+                )
             )
         else:
             observations.update(await self._collect_tls(context, hostname, port, parsed.scheme))
@@ -228,7 +231,10 @@ class NetworkProbe:
         scheme: str,
     ) -> dict[str, Observation]:
         if scheme != "https":
-            return _unknown_tls("not inspected because the origin is not HTTPS")
+            return _unknown_tls(
+                "not inspected because the origin is not HTTPS",
+                outcome=ObservationOutcome.SKIPPED,
+            )
 
         evidence = [_evidence(context.origin, "direct TLS handshake")]
         try:
@@ -320,6 +326,8 @@ def _unknown_dns(
 def _unknown_tls(
     method: str,
     evidence: list[Evidence] | None = None,
+    *,
+    outcome: ObservationOutcome = ObservationOutcome.ERROR,
 ) -> dict[str, Observation]:
     return {
         key: observation(
@@ -328,6 +336,7 @@ def _unknown_tls(
             score=0.0,
             method=method,
             evidence=evidence,
+            outcome=outcome,
         )
         for key in (
             "network.tls_handshake",
@@ -346,7 +355,7 @@ def _tls_value_observation(
     method: str,
     evidence: list[Evidence],
 ) -> Observation:
-    confidence = Confidence.CONFIRMED if value is not None else Confidence.UNKNOWN
+    confidence = Confidence.CONFIRMED if value is not None else Confidence.NO_EVIDENCE
     return observation(
         value,
         confidence=confidence,

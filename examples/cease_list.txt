@@ -1,0 +1,2 @@
+# One canonical hostname per line. An entry also blocks its subdomains.
+# Keep the operational file outside public version control if request metadata is sensitive.

@@ -1,6 +1,7 @@
 import asyncio
 import hashlib
 import time
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 
@@ -8,6 +9,7 @@ import httpx
 
 from web_openness.config import ScanConfig
 from web_openness.models import RequestRecord
+from web_openness.politeness import SQLitePolitenessStore, parse_retry_after, politeness_key
 from web_openness.safety import URLSafetyError, validate_public_url
 
 STORED_HEADERS = {
@@ -23,6 +25,7 @@ STORED_HEADERS = {
     "link",
     "permissions-policy",
     "referrer-policy",
+    "retry-after",
     "server",
     "server-timing",
     "strict-transport-security",
@@ -53,10 +56,26 @@ class FetchResult:
     truncated: bool
     error: str | None
     evidence: RequestRecord
+    attempts: tuple[RequestRecord, ...] = ()
+    deferred_until: datetime | None = None
 
     @property
     def text(self) -> str:
         return self.body.decode("utf-8", errors="replace")
+
+
+@dataclass(frozen=True, slots=True)
+class _AttemptOutcome:
+    result: FetchResult
+    next_url: str | None
+    transient: bool
+    retry_after_seconds: float | None
+
+
+@dataclass(frozen=True, slots=True)
+class _PacingRejection:
+    error: str
+    deferred_until: datetime
 
 
 class SiteClient:
@@ -73,14 +92,25 @@ class SiteClient:
         config: ScanConfig,
         *,
         transport: httpx.AsyncBaseTransport | None = None,
+        politeness_store: SQLitePolitenessStore | None = None,
+        sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
     ) -> None:
         self.config = config
         self.transport = transport
         self.records: list[RequestRecord] = []
         self._client: httpx.AsyncClient | None = None
-        self._last_request_started: float | None = None
+        self._politeness_store = politeness_store
+        self._owns_politeness_store = False
+        self._sleep = sleep
+        self.deferred_until: datetime | None = None
 
     async def __aenter__(self) -> "SiteClient":
+        if self._politeness_store is None:
+            state_path = self.config.politeness_db_path or ":memory:"
+            if isinstance(self.transport, httpx.MockTransport):
+                state_path = ":memory:"
+            self._politeness_store = SQLitePolitenessStore(state_path)
+            self._owns_politeness_store = True
         self._client = httpx.AsyncClient(
             headers={
                 "User-Agent": self.config.user_agent,
@@ -101,15 +131,23 @@ class SiteClient:
         exc: BaseException | None,
         traceback: object | None,
     ) -> None:
-        if self._client is not None:
-            await self._client.aclose()
-            self._client = None
+        try:
+            if self._client is not None:
+                await self._client.aclose()
+                self._client = None
+        finally:
+            if self._owns_politeness_store and self._politeness_store is not None:
+                await self._politeness_store.close()
+                self._politeness_store = None
+                self._owns_politeness_store = False
 
     async def get(self, url: str) -> FetchResult:
         if self._client is None:
             raise RuntimeError("SiteClient must be used as an async context manager")
         current_url = url
         redirects_followed = 0
+        transient_retries = 0
+        attempts: list[RequestRecord] = []
 
         while True:
             if len(self.records) >= self.config.request_budget:
@@ -119,32 +157,69 @@ class SiteClient:
 
             safety_error = await self._safety_error(current_url)
             if safety_error is not None:
-                return self._rejected_result(url, current_url, safety_error)
+                result = self._rejected_result(url, current_url, safety_error)
+                return replace(result, attempts=tuple(attempts))
 
-            result, next_url = await self._fetch_once(url, current_url)
-            if result.error is not None or next_url is None:
-                return result
+            domain_key = politeness_key(current_url)
+            pacing_rejection = await self._apply_persistent_pacing(domain_key)
+            if pacing_rejection is not None:
+                self.deferred_until = _latest_datetime(
+                    self.deferred_until, pacing_rejection.deferred_until
+                )
+                result = self._rejected_result(
+                    url,
+                    current_url,
+                    pacing_rejection.error,
+                    deferred_until=pacing_rejection.deferred_until,
+                )
+                return replace(result, attempts=tuple(attempts))
+
+            outcome = await self._fetch_once(url, current_url)
+            attempts.append(outcome.result.evidence)
+            if outcome.transient:
+                retry_delay = outcome.retry_after_seconds
+                if retry_delay is None:
+                    retry_delay = self.config.request_delay_seconds
+                transient_state = await self._require_politeness_store().record_transient(
+                    domain_key,
+                    retry_after_seconds=retry_delay,
+                    circuit_threshold=self.config.circuit_failure_threshold,
+                    circuit_cooldown_seconds=self.config.circuit_cooldown_seconds,
+                )
+                if (
+                    transient_state.circuit_until is not None
+                    or transient_retries >= self.config.transient_retry_limit
+                    or len(self.records) >= self.config.request_budget
+                    or retry_delay > self.config.max_politeness_wait_seconds
+                ):
+                    return replace(outcome.result, attempts=tuple(attempts))
+                transient_retries += 1
+                continue
+
+            if outcome.result.error is None:
+                await self._require_politeness_store().record_success(domain_key)
+            if outcome.result.error is not None or outcome.next_url is None:
+                return replace(outcome.result, attempts=tuple(attempts))
             if redirects_followed >= self.config.max_redirects:
                 return replace(
-                    result,
+                    outcome.result,
                     error=f"TooManyRedirects: exceeded {self.config.max_redirects} redirects",
+                    attempts=tuple(attempts),
                 )
 
             redirects_followed += 1
-            current_url = next_url
+            current_url = outcome.next_url
 
     async def _fetch_once(
         self,
         original_url: str,
         attempt_url: str,
-    ) -> tuple[FetchResult, str | None]:
+    ) -> _AttemptOutcome:
         if self._client is None:
             raise RuntimeError("SiteClient must be used as an async context manager")
 
-        await self._apply_delay()
         started_at = datetime.now(UTC)
         started_clock = time.monotonic()
-        self._last_request_started = started_clock
         status_code: int | None = None
         final_url: str | None = None
         http_version: str | None = None
@@ -153,6 +228,8 @@ class SiteClient:
         truncated = False
         error: str | None = None
         next_url: str | None = None
+        transient = False
+        retry_after_seconds: float | None = None
 
         try:
             async with self._client.stream("GET", attempt_url) as response:
@@ -161,6 +238,9 @@ class SiteClient:
                 http_version = response.http_version
                 if response.next_request is not None:
                     next_url = str(response.next_request.url)
+                if status_code in {429, 503}:
+                    transient = True
+                    retry_after_seconds = parse_retry_after(response.headers.get("retry-after"))
                 response_headers = {
                     key.lower(): value[:MAX_STORED_HEADER_CHARS]
                     for key, value in response.headers.items()
@@ -175,6 +255,9 @@ class SiteClient:
                     if len(chunk) > remaining:
                         truncated = True
                         break
+        except httpx.TransportError as exc:
+            transient = True
+            error = f"{type(exc).__name__}: {exc}"
         except (httpx.HTTPError, httpx.InvalidURL) as exc:
             error = f"{type(exc).__name__}: {exc}"
 
@@ -192,8 +275,8 @@ class SiteClient:
             error=error,
         )
         self.records.append(record)
-        return (
-            FetchResult(
+        return _AttemptOutcome(
+            result=FetchResult(
                 requested_url=original_url,
                 final_url=final_url,
                 status_code=status_code,
@@ -203,8 +286,46 @@ class SiteClient:
                 truncated=truncated,
                 error=error,
                 evidence=record,
+                attempts=(record,),
             ),
-            next_url,
+            next_url=next_url,
+            transient=transient,
+            retry_after_seconds=retry_after_seconds,
+        )
+
+    async def _apply_persistent_pacing(self, domain: str) -> _PacingRejection | None:
+        reservation = await self._require_politeness_store().reserve(
+            domain,
+            interval_seconds=self.config.request_delay_seconds,
+            max_wait_seconds=self.config.max_politeness_wait_seconds,
+        )
+        if reservation.circuit_until is not None:
+            until = datetime.fromtimestamp(reservation.circuit_until, UTC)
+            return _PacingRejection(
+                error=f"DomainCircuitOpen: requests ceased until {until.isoformat()}",
+                deferred_until=until,
+            )
+        if reservation.deferred_until is not None:
+            until = datetime.fromtimestamp(reservation.deferred_until, UTC)
+            return _PacingRejection(
+                error=f"DomainDeferred: retry after {until.isoformat()}",
+                deferred_until=until,
+            )
+        if reservation.wait_seconds > 0:
+            await self._sleep(reservation.wait_seconds)
+        return None
+
+    def _require_politeness_store(self) -> SQLitePolitenessStore:
+        if self._politeness_store is None:
+            raise RuntimeError("SiteClient must be used as an async context manager")
+        return self._politeness_store
+
+    async def set_domain_delay(self, url: str, interval_seconds: float) -> None:
+        """Persist the robots-selected interval for this registrable domain."""
+
+        await self._require_politeness_store().set_interval(
+            politeness_key(url),
+            interval_seconds,
         )
 
     async def _safety_error(self, url: str) -> str | None:
@@ -221,7 +342,13 @@ class SiteClient:
         return None
 
     @staticmethod
-    def _rejected_result(original_url: str, rejected_url: str, error: str) -> FetchResult:
+    def _rejected_result(
+        original_url: str,
+        rejected_url: str,
+        error: str,
+        *,
+        deferred_until: datetime | None = None,
+    ) -> FetchResult:
         """Represent a rejected destination without counting it as an HTTP attempt."""
 
         record = RequestRecord(
@@ -241,12 +368,9 @@ class SiteClient:
             truncated=False,
             error=error,
             evidence=record,
+            deferred_until=deferred_until,
         )
 
-    async def _apply_delay(self) -> None:
-        if self._last_request_started is None:
-            return
-        elapsed = time.monotonic() - self._last_request_started
-        remaining = self.config.request_delay_seconds - elapsed
-        if remaining > 0:
-            await asyncio.sleep(remaining)
+
+def _latest_datetime(first: datetime | None, second: datetime) -> datetime:
+    return second if first is None else max(first, second)

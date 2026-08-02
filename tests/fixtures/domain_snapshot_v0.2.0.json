@@ -1,0 +1,42 @@
+{
+  "schema_version": "0.2.0",
+  "run_id": "00000000-0000-4000-8000-000000000000",
+  "domain": "example.org",
+  "origin": "https://example.org",
+  "started_at": "2026-01-01T00:00:00Z",
+  "completed_at": "2026-01-01T00:00:01Z",
+  "collector_version": "0.1.0",
+  "request_count": 1,
+  "observations": {
+    "crawler.robots_exists": {
+      "value": true,
+      "outcome": "observed",
+      "confidence": "confirmed",
+      "confidence_score": 1.0,
+      "method": "fixture",
+      "evidence": [
+        {
+          "source_url": "https://example.org/robots.txt",
+          "observed_at": "2026-01-01T00:00:00Z",
+          "http_status": 200,
+          "content_sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+          "note": "Deterministic contract fixture"
+        }
+      ]
+    }
+  },
+  "requests": [
+    {
+      "requested_url": "https://example.org/robots.txt",
+      "final_url": "https://example.org/robots.txt",
+      "started_at": "2026-01-01T00:00:00Z",
+      "elapsed_ms": 10.0,
+      "status_code": 200,
+      "response_bytes": 24,
+      "response_truncated": false,
+      "content_sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+      "error": null
+    }
+  ],
+  "errors": []
+}

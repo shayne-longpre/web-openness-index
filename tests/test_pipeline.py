@@ -1,11 +1,13 @@
+import asyncio
 from pathlib import Path
 
 import httpx
 import pytest
 
 from web_openness.config import ScanConfig
-from web_openness.models import Confidence, Observation
-from web_openness.pipeline import Scanner, normalize_target
+from web_openness.governance import CollectionCeased
+from web_openness.models import Confidence, Observation, ObservationOutcome
+from web_openness.pipeline import DomainScanTimedOut, Scanner, normalize_target
 from web_openness.probes import (
     HomepageProbe,
     MetadataProbe,
@@ -53,6 +55,41 @@ async def test_scanner_rejects_local_target_before_running_probes() -> None:
 
     with pytest.raises(URLSafetyError):
         await scanner.scan("localhost")
+
+
+@pytest.mark.asyncio
+async def test_scanner_enforces_cease_list_before_network(tmp_path: Path) -> None:
+    cease_list = tmp_path / "cease-list.txt"
+    cease_list.write_text("example.org\n", encoding="utf-8")
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise AssertionError(f"ceased target reached transport: {request.url}")
+
+    scanner = Scanner(
+        ScanConfig(request_delay_seconds=0, cease_list_path=cease_list),
+        transport=httpx.MockTransport(handler),
+    )
+
+    with pytest.raises(CollectionCeased, match=r"example\.org"):
+        await scanner.scan("news.example.org")
+
+
+@pytest.mark.asyncio
+async def test_scanner_reloads_cease_list_before_each_target(tmp_path: Path) -> None:
+    cease_list = tmp_path / "cease-list.txt"
+    cease_list.write_text("", encoding="utf-8")
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise AssertionError(f"newly ceased target reached transport: {request.url}")
+
+    scanner = Scanner(
+        ScanConfig(request_delay_seconds=0, cease_list_path=cease_list),
+        transport=httpx.MockTransport(handler),
+    )
+    cease_list.write_text("example.org\n", encoding="utf-8")
+
+    with pytest.raises(CollectionCeased, match=r"example\.org"):
+        await scanner.scan("example.org")
 
 
 @pytest.mark.asyncio
@@ -138,6 +175,7 @@ async def test_robots_disallow_skips_all_followup_requests() -> None:
     homepage = snapshot.observations["human.homepage_accessible"]
     assert homepage.value is None
     assert homepage.confidence == Confidence.UNKNOWN
+    assert homepage.outcome == ObservationOutcome.SKIPPED
     assert snapshot.observations["metadata.llms_txt_exists"].value is None
 
 
@@ -207,3 +245,49 @@ async def test_metadata_skips_error_pages_and_non_html(
 
     assert snapshot.observations["agent.interface_links"].value is None
     assert snapshot.observations["metadata.html_title"].value is None
+
+
+@pytest.mark.asyncio
+async def test_scan_outcome_exposes_typed_pacing_deferral() -> None:
+    class ForcedDeferralProbe:
+        name = "forced_deferral"
+
+        async def collect(self, context: ProbeContext) -> dict[str, Observation]:
+            await context.client.set_domain_delay(context.origin, 30)
+            result = await context.client.get(context.origin)
+            assert result.error is not None
+            assert result.deferred_until is not None
+            return {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise AssertionError(f"deferred request reached transport: {request.url}")
+
+    scanner = Scanner(
+        ScanConfig(request_delay_seconds=0, max_politeness_wait_seconds=1),
+        probes=(ForcedDeferralProbe(),),
+        transport=httpx.MockTransport(handler),
+    )
+
+    outcome = await scanner.scan_outcome("example.org")
+
+    assert outcome.deferred_until is not None
+    assert outcome.snapshot.request_count == 0
+
+
+@pytest.mark.asyncio
+async def test_scanner_enforces_domain_wall_clock_budget() -> None:
+    class SlowProbe:
+        name = "slow"
+
+        async def collect(self, _context: ProbeContext) -> dict[str, Observation]:
+            await asyncio.sleep(1)
+            return {}
+
+    scanner = Scanner(
+        ScanConfig(request_delay_seconds=0, domain_timeout_seconds=0.01),
+        probes=(SlowProbe(),),
+        transport=httpx.MockTransport(lambda request: httpx.Response(200, request=request)),
+    )
+
+    with pytest.raises(DomainScanTimedOut, match="domain scan exceeded"):
+        await scanner.scan("example.org")

@@ -20,17 +20,18 @@ Each domain receives a timestamped evidence record. Scores and aggregate indices
 | --- | --- | --- |
 | Human access | Homepage availability, login requirements, paywalls, cookie walls, CAPTCHAs, geographic restrictions, JavaScript requirements | Human Accessibility Index |
 | Crawler access | `robots.txt`, AI-specific directives, crawl delay, sitemaps, HTTP status, 403/429 responses, browser-versus-HTTP differences | Crawl Accessibility Index |
-| Agent access | Public APIs, OpenAPI, GraphQL, OAuth metadata, MCP, A2A, agent cards, structured commerce interfaces | Agent Accessibility Index |
-| Legal access | Scraping, AI, commercial-use, licensing, API-term, and research restrictions | Legal Restrictiveness Index |
-| Economic access | Registration, metering, subscriptions, enterprise access, and API pricing | Economic Accessibility Index |
+| Agent access | Candidate links for APIs, OpenAPI, GraphQL, OAuth metadata, MCP, A2A, agent cards, and API documentation | Agent Accessibility Index |
+| Legal access | Candidate policy and license links; planned analysis of scraping, AI, commercial-use, and research restrictions | Legal Restrictiveness Index |
+| Economic access | Candidate pricing and registration links; planned analysis of metering, subscriptions, and API pricing | Economic Accessibility Index |
 | Infrastructure | CDN, WAF, DNS and hosting providers, TLS configuration, HTTP version | Infrastructure Hardening Index |
-| Preservation | Internet Archive coverage, archive blocking, cache behavior, ephemeral-content indicators | Preservation Index |
+| Preservation | Cache-header hints; planned archive coverage, archive blocking, and validated cache behavior | Preservation Index |
 
 Machine-readable metadata—including Schema.org, Open Graph, RSS/Atom/JSON feeds, sitemaps, `robots.txt`, and `llms.txt`—is retained as supporting evidence.
 
 ## Current status
 
-This repository contains the first collector skeleton and the infrastructure plan. The current collector:
+This repository contains a working HTTP measurement collector and a lean persistent batch runner.
+The current collector:
 
 - normalizes a domain into a reproducible scan target;
 - records bounded DNS resolution and TLS negotiation evidence;
@@ -38,13 +39,18 @@ This repository contains the first collector skeleton and the infrastructure pla
 - obeys applicable `robots.txt` rules before requesting other paths;
 - discovers and safely classifies one sitemap without recursively crawling it;
 - records homepage availability and response metadata;
-- records HTTP protocol, cache/security headers, and conservative CDN hints;
-- detects structured metadata, canonical/feed/manifest/OpenSearch links, and candidate public
-  interface links in the homepage HTML;
+- records HTTP protocol, security headers, cache-header hints, and conservative CDN hints;
+- detects structured metadata, canonical/feed/manifest/OpenSearch links, and bounded candidate
+  agent-interface, legal-policy, license, pricing, and registration links in homepage HTML without
+  fetching or claiming to verify those candidates;
 - checks for a public `llms.txt` when policy allows;
 - rejects local, private, reserved, and otherwise non-public network destinations;
-- emits a versioned JSON snapshot with evidence, confidence, request records, and errors;
-- enforces a per-domain request budget and delay.
+- emits a schema `0.2.0` JSON snapshot with explicit `observed`, `no_evidence`, `skipped`, and
+  `error` outcomes, plus confidence, evidence, attempt-level request records, and errors;
+- enforces the request budget across redirects and retries;
+- persists pacing by registrable domain in SQLite across workers and runs, applies effective
+  `robots.txt` `Crawl-delay`, honors `Retry-After` on HTTP 429/503, retries a transient GET at most
+  once, and temporarily ceases a domain after repeated transient failures.
 
 It does **not** yet produce an openness score. Score definitions will be added only after the measurement schema, sampling strategy, and validation protocol are documented and tested.
 
@@ -63,6 +69,13 @@ Snapshots are written under `data/snapshots/<date>/<domain>/` by default. To ins
 uv run web-openness scan example.org --json
 ```
 
+Apply a reviewed cease list before any live collection:
+
+```bash
+uv run web-openness scan example.org \
+  --cease-list examples/cease_list.txt
+```
+
 Run the complete local check suite with:
 
 ```bash
@@ -71,30 +84,50 @@ make check
 
 The tests use deterministic mock HTTP responses and do not contact live websites.
 
+The collector publishes a neutral [scanner identity and opt-out process](docs/scanner.md). Before
+sustained live collection, review the [deployment checklist](docs/deployment.md), load a canonical
+cease list, and deploy the [RFC 9511 attribution template](deploy/scanner-site/README.md).
+Application checks do not replace production network egress controls. No browser runtime is
+integrated; browser-dependent signals remain unsupported.
+
 To run the small diagnostic canary and produce a JSON plus Markdown coverage report:
 
 ```bash
 uv run web-openness smoke \
   --domains-file examples/smoke_domains.txt \
+  --cease-list examples/cease_list.txt \
   --concurrency 3
 ```
 
 This is an operational smoke test, not a research sample or ranking. See
 [docs/smoke_test.md](docs/smoke_test.md) for its outputs and interpretation.
 
+For restart-safe multi-domain collection, use the persistent batch runner:
+
+```bash
+uv run web-openness batch \
+  --domains-file examples/smoke_domains.txt \
+  --cease-list examples/cease_list.txt \
+  --concurrency 3 \
+  --json-progress
+```
+
+The command prints a run ID. Inspect, stop, or resume it with `batch-status`, `batch-stop`, and
+`batch --run-id RUN_ID`; see [docs/operations.md](docs/operations.md) for the concise runbook.
+
 ## Measurement workflow
 
-For each domain, the intended collection sequence is:
+For each domain, the implemented HTTP collection sequence is:
 
 1. Resolve and validate the target.
 2. Fetch and parse `robots.txt`.
-3. Discover sitemaps and well-known metadata.
-4. Fetch the homepage over HTTP when allowed.
-5. Render the homepage in an isolated browser worker when allowed.
-6. Parse HTML, headers, infrastructure signals, and public machine interfaces.
-7. Store an immutable, structured evidence snapshot.
-8. Validate the snapshot against the versioned schema.
-9. Derive scores and longitudinal aggregates from frozen methodology versions.
+3. Apply the effective crawler policy and persistent registrable-domain pacing.
+4. Fetch one bounded sitemap, the homepage, and `llms.txt` when allowed and within budget.
+5. Parse HTML, response headers, infrastructure hints, and candidate interface/policy links.
+6. Store and validate an immutable schema `0.2.0` evidence snapshot.
+
+Browser comparison, verified interface probing, policy-text interpretation, scoring, and
+longitudinal aggregation remain later stages.
 
 The target budget is roughly 5–15 requests per domain. This is domain characterization, not large-scale crawling.
 
@@ -103,12 +136,14 @@ The target budget is roughly 5–15 requests per domain. This is domain characte
 Measurements are not assumed to be binary. Each observation carries:
 
 - a value;
+- a collection outcome: `observed`, `no_evidence`, `skipped`, or `error`;
 - a confidence label: `confirmed`, `likely`, `possible`, `no_evidence`, or `unknown`;
 - a numeric confidence score;
 - the method that produced it;
 - supporting evidence such as URL, status, timestamp, and content hash.
 
-`No evidence` is distinct from `false`, and collection failure is represented as `unknown`. This distinction is essential for longitudinal analysis and defensible scoring.
+`No evidence` is distinct from `false`; skipped work and collection errors are also represented
+separately. This distinction is essential for longitudinal analysis and defensible scoring.
 
 ## Agent capability ladder
 
@@ -136,9 +171,11 @@ The observatory measures only publicly discoverable interfaces and never attempt
 ├── scripts/                  # Reproducible schema and maintenance commands
 ├── src/web_openness/
 │   ├── probes/               # Independently testable measurement modules
-│   ├── client.py             # Budgeted, rate-limited HTTP access
+│   ├── client.py             # Budgeted, safety-checked HTTP access
+│   ├── politeness.py         # Persistent pacing, retry, and circuit state
 │   ├── models.py             # Versioned evidence schema
 │   ├── pipeline.py           # Probe orchestration
+│   ├── runner.py             # Restart-safe batch coordination
 │   └── storage.py            # Immutable local snapshots
 ├── tests/                    # Offline unit and integration-style tests
 └── .github/workflows/ci.yml  # Formatting, linting, typing, and test checks

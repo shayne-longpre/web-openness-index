@@ -80,7 +80,10 @@ Use two stores with distinct responsibilities:
 
 Do not place large HTML bodies or screenshots in PostgreSQL. Do not use the job queue as a source of truth.
 
-For local development, the filesystem implements object storage and an in-memory job list replaces the database and queue. DuckDB can query local JSON/Parquet exports without requiring a service.
+For local development, the filesystem implements object storage and SQLite holds restart-safe job
+and politeness state. These are deliberately small adapters for one coordinator, not substitutes
+for the production catalog and queue. DuckDB can query local JSON/Parquet exports without requiring
+a service.
 
 ### Transform and scoring layer
 
@@ -108,6 +111,7 @@ Static pre-rendering is preferred for public aggregate pages. Interactive per-do
 
 - `uv` for deterministic Python environments;
 - JSON snapshots on disk;
+- SQLite run, lease, stop-control, and registrable-domain pacing state;
 - mocked responses for tests;
 - optional live canary scans behind an explicit marker;
 - DuckDB for exploratory analysis when the first dataset exists.
@@ -220,7 +224,10 @@ Logs must avoid response bodies, credentials, cookies, and unnecessary query str
 - Versioned observation schema
 - Committed JSON Schema and deterministic compatibility fixture
 - Budgeted and delayed HTTP client
+- Persistent pacing, bounded transient retry, circuit breaking, and robots crawl-delay handling
+- Restart-safe SQLite batch jobs with leases, deferrals, progress, and stop controls
 - DNS/TLS, robots, sitemap, homepage, metadata, and `llms.txt` probes
+- Public scanner identity, cease-list enforcement, and deployment safeguards
 - Immutable local JSON output
 - Offline test suite and CI
 - Public README and architecture plan

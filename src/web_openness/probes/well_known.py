@@ -1,6 +1,6 @@
 from urllib.parse import urljoin
 
-from web_openness.models import Confidence, Observation, ProbeError
+from web_openness.models import Confidence, Observation, ObservationOutcome, ProbeError
 from web_openness.probes.base import ProbeContext, evidence_from_fetch, observation
 from web_openness.probes.robots import policy_allows
 
@@ -17,6 +17,7 @@ class WellKnownProbe:
                     confidence=Confidence.UNKNOWN,
                     score=0.0,
                     method="skipped because crawler policy was not affirmatively allowed",
+                    outcome=ObservationOutcome.SKIPPED,
                 )
             }
 

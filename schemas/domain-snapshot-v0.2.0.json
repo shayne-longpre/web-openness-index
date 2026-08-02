@@ -1,0 +1,301 @@
+{
+  "$defs": {
+    "Confidence": {
+      "enum": [
+        "confirmed",
+        "likely",
+        "possible",
+        "no_evidence",
+        "unknown"
+      ],
+      "title": "Confidence",
+      "type": "string"
+    },
+    "Evidence": {
+      "additionalProperties": false,
+      "properties": {
+        "content_sha256": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Content Sha256"
+        },
+        "http_status": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Http Status"
+        },
+        "note": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Note"
+        },
+        "observed_at": {
+          "format": "date-time",
+          "title": "Observed At",
+          "type": "string"
+        },
+        "source_url": {
+          "title": "Source Url",
+          "type": "string"
+        }
+      },
+      "required": [
+        "source_url",
+        "observed_at"
+      ],
+      "title": "Evidence",
+      "type": "object"
+    },
+    "Observation": {
+      "additionalProperties": false,
+      "properties": {
+        "confidence": {
+          "$ref": "#/$defs/Confidence"
+        },
+        "confidence_score": {
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "Confidence Score",
+          "type": "number"
+        },
+        "evidence": {
+          "items": {
+            "$ref": "#/$defs/Evidence"
+          },
+          "title": "Evidence",
+          "type": "array"
+        },
+        "method": {
+          "title": "Method",
+          "type": "string"
+        },
+        "outcome": {
+          "$ref": "#/$defs/ObservationOutcome"
+        },
+        "value": {
+          "title": "Value"
+        }
+      },
+      "required": [
+        "value",
+        "outcome",
+        "confidence",
+        "confidence_score",
+        "method"
+      ],
+      "title": "Observation",
+      "type": "object"
+    },
+    "ObservationOutcome": {
+      "description": "Collection outcome, separate from confidence in an observed value.",
+      "enum": [
+        "observed",
+        "no_evidence",
+        "skipped",
+        "error"
+      ],
+      "title": "ObservationOutcome",
+      "type": "string"
+    },
+    "ProbeError": {
+      "additionalProperties": false,
+      "properties": {
+        "message": {
+          "title": "Message",
+          "type": "string"
+        },
+        "probe": {
+          "title": "Probe",
+          "type": "string"
+        }
+      },
+      "required": [
+        "probe",
+        "message"
+      ],
+      "title": "ProbeError",
+      "type": "object"
+    },
+    "RequestRecord": {
+      "additionalProperties": false,
+      "properties": {
+        "content_sha256": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Content Sha256"
+        },
+        "elapsed_ms": {
+          "minimum": 0.0,
+          "title": "Elapsed Ms",
+          "type": "number"
+        },
+        "error": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Error"
+        },
+        "final_url": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Final Url"
+        },
+        "requested_url": {
+          "title": "Requested Url",
+          "type": "string"
+        },
+        "response_bytes": {
+          "minimum": 0,
+          "title": "Response Bytes",
+          "type": "integer"
+        },
+        "response_truncated": {
+          "default": false,
+          "title": "Response Truncated",
+          "type": "boolean"
+        },
+        "started_at": {
+          "format": "date-time",
+          "title": "Started At",
+          "type": "string"
+        },
+        "status_code": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Status Code"
+        }
+      },
+      "required": [
+        "requested_url",
+        "started_at",
+        "elapsed_ms",
+        "response_bytes"
+      ],
+      "title": "RequestRecord",
+      "type": "object"
+    }
+  },
+  "$id": "https://raw.githubusercontent.com/shayne-longpre/web-openness-index/main/schemas/domain-snapshot-v0.2.0.json",
+  "additionalProperties": false,
+  "properties": {
+    "collector_version": {
+      "title": "Collector Version",
+      "type": "string"
+    },
+    "completed_at": {
+      "format": "date-time",
+      "title": "Completed At",
+      "type": "string"
+    },
+    "domain": {
+      "title": "Domain",
+      "type": "string"
+    },
+    "errors": {
+      "items": {
+        "$ref": "#/$defs/ProbeError"
+      },
+      "title": "Errors",
+      "type": "array"
+    },
+    "observations": {
+      "additionalProperties": {
+        "$ref": "#/$defs/Observation"
+      },
+      "title": "Observations",
+      "type": "object"
+    },
+    "origin": {
+      "title": "Origin",
+      "type": "string"
+    },
+    "request_count": {
+      "minimum": 0,
+      "title": "Request Count",
+      "type": "integer"
+    },
+    "requests": {
+      "items": {
+        "$ref": "#/$defs/RequestRecord"
+      },
+      "title": "Requests",
+      "type": "array"
+    },
+    "run_id": {
+      "title": "Run Id",
+      "type": "string"
+    },
+    "schema_version": {
+      "const": "0.2.0",
+      "default": "0.2.0",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "started_at": {
+      "format": "date-time",
+      "title": "Started At",
+      "type": "string"
+    }
+  },
+  "required": [
+    "run_id",
+    "domain",
+    "origin",
+    "started_at",
+    "completed_at",
+    "collector_version",
+    "request_count",
+    "observations",
+    "requests"
+  ],
+  "title": "DomainSnapshot",
+  "type": "object"
+}

@@ -2,9 +2,9 @@ from datetime import datetime
 from enum import StrEnum
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-SCHEMA_VERSION: Literal["0.1.0"] = "0.1.0"
+SCHEMA_VERSION: Literal["0.2.0"] = "0.2.0"
 
 
 class ContractModel(BaseModel):
@@ -21,6 +21,15 @@ class Confidence(StrEnum):
     UNKNOWN = "unknown"
 
 
+class ObservationOutcome(StrEnum):
+    """Collection outcome, separate from confidence in an observed value."""
+
+    OBSERVED = "observed"
+    NO_EVIDENCE = "no_evidence"
+    SKIPPED = "skipped"
+    ERROR = "error"
+
+
 class Evidence(ContractModel):
     source_url: str
     observed_at: datetime
@@ -31,10 +40,30 @@ class Evidence(ContractModel):
 
 class Observation(ContractModel):
     value: Any
+    outcome: ObservationOutcome
     confidence: Confidence
     confidence_score: float = Field(ge=0.0, le=1.0)
     method: str
     evidence: list[Evidence] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def outcome_matches_confidence(self) -> "Observation":
+        expected = {
+            ObservationOutcome.OBSERVED: {
+                Confidence.CONFIRMED,
+                Confidence.LIKELY,
+                Confidence.POSSIBLE,
+            },
+            ObservationOutcome.NO_EVIDENCE: {Confidence.NO_EVIDENCE},
+            ObservationOutcome.SKIPPED: {Confidence.UNKNOWN},
+            ObservationOutcome.ERROR: {Confidence.UNKNOWN},
+        }
+        if self.confidence not in expected[self.outcome]:
+            raise ValueError(
+                f"outcome {self.outcome.value!r} is inconsistent with "
+                f"confidence {self.confidence.value!r}"
+            )
+        return self
 
 
 class RequestRecord(ContractModel):
@@ -55,7 +84,7 @@ class ProbeError(ContractModel):
 
 
 class DomainSnapshot(ContractModel):
-    schema_version: Literal["0.1.0"] = SCHEMA_VERSION
+    schema_version: Literal["0.2.0"] = SCHEMA_VERSION
     run_id: str
     domain: str
     origin: str

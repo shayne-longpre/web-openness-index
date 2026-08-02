@@ -88,6 +88,7 @@ class RobotsProbe:
             }
 
         if status in {404, 410}:
+            await context.client.set_domain_delay(url, context.config.request_delay_seconds)
             context.shared["robots_allows_followup"] = True
             return {
                 "crawler.robots_exists": observation(
@@ -140,6 +141,11 @@ class RobotsProbe:
             }
 
         parsed = parse_robots(result.text)
+        crawl_delay = parsed.policy.crawl_delay(context.config.user_agent_token)
+        await context.client.set_domain_delay(
+            url,
+            crawl_delay if crawl_delay is not None else context.config.request_delay_seconds,
+        )
         homepage_url = urljoin(f"{context.origin}/", "/")
         allows_homepage = parsed.policy.can_fetch(homepage_url, context.config.user_agent_token)
         ai_homepage_policies = {

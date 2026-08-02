@@ -1,0 +1,6 @@
+# Replace all example values before deployment.
+Canonical: https://scanner.example.org/.well-known/probing.txt
+Contact: mailto:web-measurement@example.org
+Expires: 2027-01-01T00:00:00Z
+Preferred-Languages: en
+Description: Bounded public-web accessibility research; methods and opt-out are described at https://scanner.example.org/
