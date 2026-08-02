@@ -3,7 +3,7 @@ from urllib.parse import urljoin
 
 from protego import Protego
 
-from web_openness.models import Confidence, Observation, ProbeError
+from web_openness.models import Confidence, Evidence, Observation, ObservationOutcome, ProbeError
 from web_openness.probes.base import ProbeContext, evidence_from_fetch, observation
 
 KNOWN_AI_AGENTS = {
@@ -19,6 +19,17 @@ KNOWN_AI_AGENTS = {
     "meta-externalagent",
     "perplexitybot",
 }
+
+ROBOTS_KEYS = (
+    "crawler.robots_exists",
+    "crawler.robots_status",
+    "crawler.user_agents",
+    "crawler.ai_specific_user_agents",
+    "crawler.ai_homepage_policies",
+    "crawler.crawl_delays",
+    "crawler.sitemaps",
+    "crawler.homepage_policy_allowed",
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -77,15 +88,13 @@ class RobotsProbe:
         if result.error is not None:
             context.shared["robots_allows_followup"] = False
             context.errors.append(ProbeError(probe=self.name, message=result.error))
-            return {
-                "crawler.robots_exists": observation(
-                    None,
-                    confidence=Confidence.UNKNOWN,
-                    score=0.0,
-                    method="robots.txt fetch failed",
-                    evidence=evidence,
-                )
-            }
+            return _unavailable_robots("robots.txt fetch failed", evidence=evidence)
+
+        if result.truncated:
+            context.shared["robots_allows_followup"] = False
+            message = "robots.txt was truncated at the response-size limit"
+            context.errors.append(ProbeError(probe=self.name, message=message))
+            return _unavailable_robots(message, evidence=evidence, status=status)
 
         if status in {404, 410}:
             await context.client.set_domain_delay(url, context.config.request_delay_seconds)
@@ -105,11 +114,39 @@ class RobotsProbe:
                     method="HTTP status",
                     evidence=evidence,
                 ),
+                "crawler.user_agents": observation(
+                    [],
+                    confidence=Confidence.CONFIRMED,
+                    score=1.0,
+                    method="robots.txt was not present",
+                    evidence=evidence,
+                ),
+                "crawler.ai_specific_user_agents": observation(
+                    [],
+                    confidence=Confidence.CONFIRMED,
+                    score=1.0,
+                    method="robots.txt was not present",
+                    evidence=evidence,
+                ),
                 "crawler.ai_homepage_policies": observation(
                     dict.fromkeys(sorted(KNOWN_AI_AGENTS), True),
                     confidence=Confidence.CONFIRMED,
                     score=1.0,
                     method="no robots.txt restrictions were present",
+                    evidence=evidence,
+                ),
+                "crawler.crawl_delays": observation(
+                    {},
+                    confidence=Confidence.CONFIRMED,
+                    score=1.0,
+                    method="robots.txt was not present",
+                    evidence=evidence,
+                ),
+                "crawler.sitemaps": observation(
+                    [],
+                    confidence=Confidence.CONFIRMED,
+                    score=1.0,
+                    method="robots.txt was not present",
                     evidence=evidence,
                 ),
                 "crawler.homepage_policy_allowed": observation(
@@ -123,22 +160,12 @@ class RobotsProbe:
 
         if status != 200:
             context.shared["robots_allows_followup"] = False
-            return {
-                "crawler.robots_exists": observation(
-                    None,
-                    confidence=Confidence.UNKNOWN,
-                    score=0.2,
-                    method="robots.txt returned an inconclusive status",
-                    evidence=evidence,
-                ),
-                "crawler.robots_status": observation(
-                    status,
-                    confidence=Confidence.CONFIRMED,
-                    score=1.0,
-                    method="HTTP status",
-                    evidence=evidence,
-                ),
-            }
+            return _unavailable_robots(
+                "robots.txt returned an inconclusive status",
+                evidence=evidence,
+                status=status,
+                outcome=ObservationOutcome.NO_EVIDENCE,
+            )
 
         parsed = parse_robots(result.text)
         crawl_delay = parsed.policy.crawl_delay(context.config.user_agent_token)
@@ -213,6 +240,38 @@ class RobotsProbe:
                 evidence=evidence,
             ),
         }
+
+
+def _unavailable_robots(
+    method: str,
+    *,
+    evidence: list[Evidence],
+    status: int | None = None,
+    outcome: ObservationOutcome = ObservationOutcome.ERROR,
+) -> dict[str, Observation]:
+    confidence = (
+        Confidence.NO_EVIDENCE if outcome == ObservationOutcome.NO_EVIDENCE else Confidence.UNKNOWN
+    )
+    values = {
+        key: observation(
+            None,
+            confidence=confidence,
+            score=0.0,
+            method=method,
+            evidence=evidence,
+            outcome=outcome,
+        )
+        for key in ROBOTS_KEYS
+    }
+    if status is not None:
+        values["crawler.robots_status"] = observation(
+            status,
+            confidence=Confidence.CONFIRMED,
+            score=1.0,
+            method="HTTP status",
+            evidence=evidence,
+        )
+    return values
 
 
 def policy_allows(context: ProbeContext, url: str) -> bool:

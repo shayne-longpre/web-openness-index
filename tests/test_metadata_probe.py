@@ -9,7 +9,7 @@ from web_openness.probes.base import ProbeContext
 from web_openness.probes.metadata import MetadataProbe
 
 
-def _context(html: str) -> ProbeContext:
+def _context(html: str, *, truncated: bool = False) -> ProbeContext:
     config = ScanConfig(request_delay_seconds=0)
     context = ProbeContext(
         domain="example.org",
@@ -39,7 +39,7 @@ def _context(html: str) -> ProbeContext:
                 status_code=200,
                 headers={"content-type": "text/html"},
                 body=html.encode(),
-                truncated=False,
+                truncated=truncated,
                 error=None,
                 evidence=record,
                 http_version="HTTP/2",
@@ -110,12 +110,40 @@ async def test_malformed_json_ld_is_unknown_without_breaking_other_metadata() ->
 
 
 @pytest.mark.asyncio
+async def test_truncated_html_keeps_findings_but_invalidates_absence() -> None:
+    values = await MetadataProbe().collect(
+        _context('<meta property="og:title" content="Example">', truncated=True)
+    )
+
+    assert values["metadata.open_graph"].value is True
+    assert values["metadata.open_graph"].outcome == ObservationOutcome.OBSERVED
+    assert values["metadata.feeds"].value is None
+    assert values["metadata.feeds"].outcome == ObservationOutcome.ERROR
+
+
+@pytest.mark.asyncio
 async def test_discovery_markers_match_tokens_not_substrings() -> None:
     values = await MetadataProbe().collect(
         _context('<html><body><a href="/photos">Photos</a></body></html>')
     )
 
     assert values["legal.policy_links"].value == []
+
+
+@pytest.mark.asyncio
+async def test_interface_markers_match_path_components_not_substrings() -> None:
+    values = await MetadataProbe().collect(
+        _context(
+            '<a href="/mcpherson">Biography</a>'
+            '<a href="/a2about">About</a>'
+            '<a href="/.well-known/agentless">Agentless</a>'
+            '<a href="/openapi.json">OpenAPI</a>'
+        )
+    )
+
+    assert [item["url"] for item in values["agent.interface_links"].value] == [
+        "https://www.example.org/openapi.json"
+    ]
 
 
 @pytest.mark.asyncio

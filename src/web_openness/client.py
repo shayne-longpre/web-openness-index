@@ -206,7 +206,7 @@ class SiteClient:
 
             outcome = await self._fetch_once(url, current_url)
             attempts.append(outcome.result.evidence)
-            cookie_names.update(outcome.result.cookie_names)
+            _merge_cookie_names(cookie_names, outcome.result.cookie_names)
             if outcome.transient:
                 retry_delay = outcome.retry_after_seconds
                 if retry_delay is None:
@@ -429,6 +429,15 @@ def _extract_cookie_names(headers: list[str]) -> tuple[str, ...]:
         if len(names) >= MAX_COOKIE_NAMES:
             break
     return tuple(sorted(names, key=str.lower))
+
+
+def _merge_cookie_names(existing: set[str], incoming: tuple[str, ...]) -> None:
+    for name in incoming:
+        if name in existing:
+            continue
+        if len(existing) >= MAX_COOKIE_NAMES:
+            return
+        existing.add(name)
 
 
 def _latest_datetime(first: datetime | None, second: datetime) -> datetime:

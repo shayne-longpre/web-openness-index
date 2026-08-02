@@ -6,7 +6,7 @@ from urllib.parse import urljoin, urlsplit
 
 from web_openness.client import FetchResult
 from web_openness.models import Confidence, Evidence, Observation, ObservationOutcome
-from web_openness.probes.base import ProbeContext, observation
+from web_openness.probes.base import ProbeContext, mark_absences_inconclusive, observation
 
 FEED_TYPES = {
     "application/atom+xml",
@@ -54,7 +54,9 @@ class MetadataHTMLParser(HTMLParser):
         self.html_language: str | None = None
         self.generator: str | None = None
         self._title_parts: list[str] = []
+        self._title_chars = 0
         self._json_ld_parts: list[str] = []
+        self._json_ld_chars = 0
         self._in_title = False
         self._title_complete = False
         self._in_json_ld = False
@@ -76,6 +78,7 @@ class MetadataHTMLParser(HTMLParser):
             self.has_json_ld = True
             self._in_json_ld = True
             self._json_ld_parts = []
+            self._json_ld_chars = 0
         if tag == "meta":
             if values.get("property", "").lower().startswith("og:"):
                 self.has_open_graph = True
@@ -115,15 +118,19 @@ class MetadataHTMLParser(HTMLParser):
             self._current_anchor = None
 
     def handle_data(self, data: str) -> None:
-        if self._in_title and sum(map(len, self._title_parts)) < MAX_TEXT_CHARS:
-            self._title_parts.append(data)
-        if self._in_json_ld and sum(map(len, self._json_ld_parts)) < MAX_JSON_LD_CHARS:
-            self._json_ld_parts.append(data)
-        if (
-            self._current_anchor is not None
-            and len(self._current_anchor["text"]) < MAX_LINK_TEXT_CHARS
-        ):
-            self._current_anchor["text"] += data
+        if self._in_title:
+            chunk = data[: MAX_TEXT_CHARS - self._title_chars]
+            if chunk:
+                self._title_parts.append(chunk)
+                self._title_chars += len(chunk)
+        if self._in_json_ld:
+            chunk = data[: MAX_JSON_LD_CHARS - self._json_ld_chars]
+            if chunk:
+                self._json_ld_parts.append(chunk)
+                self._json_ld_chars += len(chunk)
+        if self._current_anchor is not None:
+            text = self._current_anchor["text"]
+            self._current_anchor["text"] = text + data[: MAX_LINK_TEXT_CHARS - len(text)]
 
     def _record_link(self, values: dict[str, str], tag: str) -> None:
         rels = {part.lower() for part in values.get("rel", "").split()}
@@ -196,7 +203,7 @@ class MetadataProbe:
         interface_kinds = _classify_interface_links(interface_links)
         json_ld_types, parsed_json_ld = _json_ld_types(parser.json_ld_documents)
 
-        return {
+        observations = {
             "metadata.json_ld": _presence(
                 parser.has_json_ld, "homepage JSON-LD script tag detection", evidence
             ),
@@ -278,6 +285,13 @@ class MetadataProbe:
                 for key, links in discovery_links.items()
             },
         }
+        if isinstance(response, FetchResult) and response.truncated:
+            return mark_absences_inconclusive(
+                observations,
+                method="homepage HTML was truncated; absence could not be established",
+                evidence=evidence,
+            )
+        return observations
 
 
 def _unknown_metadata(
@@ -489,21 +503,26 @@ def _json_ld_types(documents: list[str]) -> tuple[list[str], bool]:
 def _is_interface_candidate(href: str, rels: set[str], media_type: str) -> bool:
     if rels & INTERFACE_RELS or media_type in INTERFACE_MEDIA_TYPES:
         return True
-    path = urlsplit(href).path.lower()
-    markers = (
-        "/api-docs",
-        "/a2a",
-        "/graphql",
-        "/mcp",
-        "/oauth",
-        "/openapi",
-        "/swagger",
-        "/.well-known/agent",
-        "/.well-known/mcp",
-        "/.well-known/oauth",
-        "/.well-known/openid-configuration",
-    )
-    return any(marker in path for marker in markers)
+    parts = tuple(part for part in urlsplit(href).path.lower().split("/") if part)
+    if len(parts) >= 2 and parts[-2] == ".well-known" and _well_known_interface(parts[-1]):
+        return True
+    names = ("a2a", "api-docs", "graphql", "mcp", "oauth", "oauth2", "openapi", "swagger")
+    return any(_named_path_component(part, name) for part in parts for name in names)
+
+
+def _well_known_interface(name: str) -> bool:
+    return name in {
+        "agent.json",
+        "agent-card.json",
+        "mcp",
+        "mcp.json",
+        "oauth-authorization-server",
+        "openid-configuration",
+    }
+
+
+def _named_path_component(part: str, name: str) -> bool:
+    return part == name or any(part.startswith(f"{name}{separator}") for separator in ("-", "."))
 
 
 def _http_url(base_url: str, value: str) -> str | None:

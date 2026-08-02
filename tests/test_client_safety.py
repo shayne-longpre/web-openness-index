@@ -1,7 +1,12 @@
 import httpx
 import pytest
 
-from web_openness.client import MAX_STORED_HEADER_CHARS, RequestBudgetExceeded, SiteClient
+from web_openness.client import (
+    MAX_COOKIE_NAMES,
+    MAX_STORED_HEADER_CHARS,
+    RequestBudgetExceeded,
+    SiteClient,
+)
 from web_openness.config import ScanConfig
 from web_openness.safety import URLSafetyError, validate_public_url
 
@@ -137,6 +142,26 @@ async def test_public_redirect_preserves_bounded_evidence() -> None:
     ]
     assert [record.status_code for record in client.records] == [302, 200]
     assert result.evidence is client.records[-1]
+
+
+@pytest.mark.asyncio
+async def test_cookie_name_limit_applies_across_redirects() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/start":
+            headers = [("location", "/final")]
+            headers.extend(("set-cookie", f"c{index:03}=secret") for index in range(40))
+            return httpx.Response(302, headers=headers, request=request)
+        headers = [("set-cookie", f"c{index:03}=secret") for index in range(40, 80)]
+        return httpx.Response(200, headers=headers, request=request)
+
+    async with SiteClient(
+        ScanConfig(request_delay_seconds=0),
+        transport=httpx.MockTransport(handler),
+    ) as client:
+        result = await client.get("https://example.org/start")
+
+    assert len(result.cookie_names) == MAX_COOKIE_NAMES
+    assert result.cookie_names == tuple(f"c{index:03}" for index in range(MAX_COOKIE_NAMES))
 
 
 @pytest.mark.asyncio

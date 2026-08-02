@@ -26,12 +26,14 @@ report. Each observation has an explicit outcome:
 ## What this run exercises
 
 - **Direct evidence:** DNS addresses/CNAME/NS/SOA, TLS, actual HTTP attempts and protocol,
-  `robots.txt`, bounded sitemap structure, homepage status and metadata, security headers, exact
-  response cache outcomes when exposed, and `llms.txt`.
+  `robots.txt`, bounded sitemap structure, homepage status and metadata, scan-wide status
+  distribution and HTTP 403/429 frequencies, security headers, exact response cache outcomes when
+  exposed, and `llms.txt`.
 - **Conservative hints:** CDN, edge, DNS, hosting, bot-management, load-balancer, acceleration, and
   explicit challenge/block evidence plus known paywall, consent-management, CAPTCHA, and explicit
-  JavaScript-required markup. Provider attribution remains probabilistic, and a single response
-  does not establish a site's complete product configuration or general cache behavior.
+  JavaScript-required markup. HTTP 451 is only a possible geographic or jurisdictional restriction.
+  Provider attribution remains probabilistic, and a single response does not establish a site's
+  complete product configuration or general cache behavior.
 - **Conventional discovery:** bounded public DNS queries for `tollbit.<domain>`; a record is not a
   claim that TollBit enforcement is active on every path.
 - **Explicit declarations:** `rel=license`, JSON-LD `license`, `isAccessibleForFree`, and

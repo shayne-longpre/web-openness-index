@@ -1,5 +1,4 @@
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
 from typing import Protocol
 
 from web_openness.client import FetchResult, SiteClient
@@ -10,6 +9,7 @@ from web_openness.models import (
     Observation,
     ObservationOutcome,
     ProbeError,
+    RequestRecord,
 )
 
 
@@ -30,11 +30,22 @@ class Probe(Protocol):
 
 
 def evidence_from_fetch(result: FetchResult, *, note: str | None = None) -> Evidence:
+    record = result.evidence
     return Evidence(
-        source_url=result.final_url or result.requested_url,
-        observed_at=datetime.now(UTC),
-        http_status=result.status_code,
-        content_sha256=result.evidence.content_sha256,
+        source_url=result.final_url or record.final_url or result.requested_url,
+        observed_at=record.started_at,
+        http_status=record.status_code,
+        content_sha256=record.content_sha256,
+        note=note,
+    )
+
+
+def evidence_from_request(record: RequestRecord, *, note: str | None = None) -> Evidence:
+    return Evidence(
+        source_url=record.final_url or record.requested_url,
+        observed_at=record.started_at,
+        http_status=record.status_code,
+        content_sha256=record.content_sha256,
         note=note,
     )
 
@@ -63,3 +74,28 @@ def observation(
         method=method,
         evidence=evidence or [],
     )
+
+
+def mark_absences_inconclusive(
+    observations: dict[str, Observation],
+    *,
+    method: str,
+    evidence: list[Evidence],
+) -> dict[str, Observation]:
+    """Retain positive findings but invalidate absences from an incomplete source."""
+
+    return {
+        key: (
+            observation(
+                None,
+                confidence=Confidence.UNKNOWN,
+                score=0.0,
+                method=method,
+                evidence=evidence,
+                outcome=ObservationOutcome.ERROR,
+            )
+            if value.outcome == ObservationOutcome.NO_EVIDENCE
+            else value
+        )
+        for key, value in observations.items()
+    }

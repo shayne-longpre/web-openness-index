@@ -91,6 +91,18 @@ async def test_classifies_authentication_challenge() -> None:
 
 
 @pytest.mark.asyncio
+async def test_451_is_a_conservative_geographic_restriction_hint() -> None:
+    values = await ResponseProbe().collect(_context(451, {}))
+
+    assert values["human.http_access_disposition"].value == ("unavailable_for_legal_reasons")
+    assert values["human.geographic_restriction"].value == {
+        "detected": True,
+        "status": 451,
+    }
+    assert values["human.geographic_restriction"].confidence == Confidence.POSSIBLE
+
+
+@pytest.mark.asyncio
 async def test_reports_only_specific_waf_response_hints() -> None:
     values = await ResponseProbe().collect(
         _context(

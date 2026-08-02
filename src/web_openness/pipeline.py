@@ -25,6 +25,7 @@ from web_openness.probes import (
     WellKnownProbe,
 )
 from web_openness.probes.base import Probe, ProbeContext
+from web_openness.probes.http_attempts import summarize_http_attempts
 from web_openness.safety import validate_public_url
 
 DEFAULT_PROBES: tuple[Probe, ...] = (
@@ -142,6 +143,13 @@ class Scanner:
                     context.errors.append(
                         ProbeError(probe=probe.name, message=f"{type(exc).__name__}: {exc}")
                     )
+
+            attempt_observations = summarize_http_attempts(client.records)
+            overlap = observations.keys() & attempt_observations.keys()
+            if overlap:
+                duplicate = ", ".join(sorted(overlap))
+                raise ValueError(f"HTTP summary emitted duplicate observations: {duplicate}")
+            observations.update(attempt_observations)
 
             completed_at = datetime.now(UTC)
             snapshot = DomainSnapshot(

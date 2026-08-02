@@ -80,6 +80,9 @@ SIGNAL_CATALOG: tuple[SignalSpec, ...] = tuple(
         "crawler.crawl_delays",
         "crawler.sitemaps",
         "crawler.homepage_policy_allowed",
+        "crawler.http_status_distribution",
+        "crawler.http_403_frequency",
+        "crawler.http_429_frequency",
         "human.homepage_accessible",
         "human.homepage_status",
         "human.homepage_final_url",
@@ -88,6 +91,7 @@ SIGNAL_CATALOG: tuple[SignalSpec, ...] = tuple(
         "human.authentication_challenge",
         "human.login_required",
         "human.rate_limited",
+        "human.geographic_restriction",
         "human.paywall_detected",
         "human.cookie_wall_detected",
         "human.captcha_detected",
@@ -337,8 +341,8 @@ def render_markdown(run: SmokeRun) -> str:
             "## Access-condition findings",
             "",
             "| Domain | Paywall hint | Consent hint | CAPTCHA hint | JavaScript hint | "
-            "License | Subscription | WAF hint |",
-            "| --- | --- | --- | --- | --- | --- | --- | --- |",
+            "Geo restriction | License | Subscription | WAF hint |",
+            "| --- | --- | --- | --- | --- | --- | --- | --- | --- |",
         ]
     )
     for domain in run.domains:
@@ -349,6 +353,7 @@ def render_markdown(run: SmokeRun) -> str:
             f"{_display_signal(domain, 'human.cookie_wall_detected')} | "
             f"{_display_signal(domain, 'human.captcha_detected')} | "
             f"{_display_signal(domain, 'human.javascript_required')} | "
+            f"{_display_signal(domain, 'human.geographic_restriction')} | "
             f"{_display_signal(domain, 'legal.license')} | "
             f"{_display_signal(domain, 'economic.subscription_required')} | "
             f"{_display_signal(domain, 'infrastructure.waf')} |"

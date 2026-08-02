@@ -181,6 +181,21 @@ async def test_robots_disallow_skips_all_followup_requests() -> None:
     assert homepage.value is None
     assert homepage.confidence == Confidence.UNKNOWN
     assert homepage.outcome == ObservationOutcome.SKIPPED
+    assert {
+        "human.homepage_accessible",
+        "human.homepage_status",
+        "human.homepage_final_url",
+        "human.homepage_content_type",
+    } <= snapshot.observations.keys()
+    assert all(
+        snapshot.observations[key].outcome == ObservationOutcome.SKIPPED
+        for key in (
+            "human.homepage_accessible",
+            "human.homepage_status",
+            "human.homepage_final_url",
+            "human.homepage_content_type",
+        )
+    )
     assert snapshot.observations["human.paywall_detected"].outcome == ObservationOutcome.SKIPPED
     assert snapshot.observations["metadata.llms_txt_exists"].value is None
 
@@ -200,7 +215,42 @@ async def test_inconclusive_robots_status_fails_closed() -> None:
 
     assert snapshot.request_count == 1
     assert snapshot.observations["crawler.robots_exists"].value is None
+    assert snapshot.observations["crawler.robots_exists"].outcome == (
+        ObservationOutcome.NO_EVIDENCE
+    )
+    assert snapshot.observations["crawler.robots_status"].value == 403
+    assert all(key in snapshot.observations for key in _robots_keys())
     assert snapshot.observations["human.homepage_accessible"].value is None
+
+
+@pytest.mark.asyncio
+async def test_truncated_robots_fails_closed() -> None:
+    calls: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(request.url.path)
+        assert request.url.path == "/robots.txt"
+        return httpx.Response(
+            200,
+            text="User-agent: *\nAllow: /\nDisallow: /later\n",
+            request=request,
+        )
+
+    scanner = Scanner(
+        ScanConfig(request_delay_seconds=0, max_response_bytes=20),
+        probes=(RobotsProbe(), HomepageProbe()),
+        transport=httpx.MockTransport(handler),
+    )
+    snapshot = await scanner.scan("example.org")
+
+    assert calls == ["/robots.txt"]
+    assert snapshot.observations["crawler.robots_exists"].outcome == ObservationOutcome.ERROR
+    assert snapshot.observations["crawler.robots_status"].value == 200
+    assert snapshot.observations["human.homepage_accessible"].outcome == (
+        ObservationOutcome.SKIPPED
+    )
+    assert snapshot.errors[0].probe == "robots"
+    assert "truncated" in snapshot.errors[0].message
 
 
 @pytest.mark.asyncio
@@ -219,6 +269,62 @@ async def test_missing_robots_records_unrestricted_policy() -> None:
     assert snapshot.observations["crawler.homepage_policy_allowed"].value is True
     policies = snapshot.observations["crawler.ai_homepage_policies"].value
     assert policies["gptbot"] is True
+    assert snapshot.observations["crawler.user_agents"].value == []
+    assert snapshot.observations["crawler.ai_specific_user_agents"].value == []
+    assert snapshot.observations["crawler.crawl_delays"].value == {}
+    assert snapshot.observations["crawler.sitemaps"].value == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("status", "expected", "outcome"),
+    [
+        (200, True, ObservationOutcome.OBSERVED),
+        (404, False, ObservationOutcome.OBSERVED),
+        (500, None, ObservationOutcome.NO_EVIDENCE),
+    ],
+)
+async def test_llms_txt_distinguishes_presence_absence_and_inconclusive_status(
+    status: int,
+    expected: bool | None,
+    outcome: ObservationOutcome,
+) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/robots.txt":
+            return httpx.Response(404, request=request)
+        assert request.url.path == "/llms.txt"
+        return httpx.Response(status, request=request)
+
+    scanner = Scanner(
+        ScanConfig(request_delay_seconds=0),
+        probes=(RobotsProbe(), WellKnownProbe()),
+        transport=httpx.MockTransport(handler),
+    )
+    snapshot = await scanner.scan("example.org")
+
+    assert snapshot.observations["metadata.llms_txt_exists"].value is expected
+    assert snapshot.observations["metadata.llms_txt_exists"].outcome == outcome
+    assert snapshot.observations["metadata.llms_txt_status"].value == status
+
+
+@pytest.mark.asyncio
+async def test_scan_status_summary_survives_request_budget_exhaustion() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/robots.txt"
+        return httpx.Response(404, request=request)
+
+    scanner = Scanner(
+        ScanConfig(request_budget=1, request_delay_seconds=0),
+        probes=(RobotsProbe(), HomepageProbe()),
+        transport=httpx.MockTransport(handler),
+    )
+    snapshot = await scanner.scan("example.org")
+
+    assert snapshot.observations["crawler.http_status_distribution"].value == {"404": 1}
+    assert snapshot.observations["crawler.http_403_frequency"].value["rate"] == 0.0
+    assert snapshot.observations["crawler.http_429_frequency"].value["rate"] == 0.0
+    assert snapshot.errors[0].probe == "homepage"
+    assert "request budget" in snapshot.errors[0].message
 
 
 @pytest.mark.asyncio
@@ -278,6 +384,19 @@ async def test_scan_outcome_exposes_typed_pacing_deferral() -> None:
 
     assert outcome.deferred_until is not None
     assert outcome.snapshot.request_count == 0
+
+
+def _robots_keys() -> tuple[str, ...]:
+    return (
+        "crawler.robots_exists",
+        "crawler.robots_status",
+        "crawler.user_agents",
+        "crawler.ai_specific_user_agents",
+        "crawler.ai_homepage_policies",
+        "crawler.crawl_delays",
+        "crawler.sitemaps",
+        "crawler.homepage_policy_allowed",
+    )
 
 
 @pytest.mark.asyncio

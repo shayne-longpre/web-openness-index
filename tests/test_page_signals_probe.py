@@ -9,7 +9,7 @@ from web_openness.probes.base import ProbeContext
 from web_openness.probes.page_signals import PageSignalsProbe
 
 
-def _context(html: str | None) -> ProbeContext:
+def _context(html: str | None, *, truncated: bool = False) -> ProbeContext:
     config = ScanConfig(request_delay_seconds=0)
     context = ProbeContext(
         domain="example.org",
@@ -44,7 +44,7 @@ def _context(html: str | None) -> ProbeContext:
                 status_code=200,
                 headers={"content-type": "text/html"},
                 body=html.encode(),
-                truncated=False,
+                truncated=truncated,
                 error=None,
                 evidence=record,
                 http_version="HTTP/2",
@@ -139,6 +139,16 @@ async def test_explicit_subscription_false_is_a_collected_negative() -> None:
     assert finding.value is False
     assert finding.confidence == Confidence.CONFIRMED
     assert finding.outcome == ObservationOutcome.OBSERVED
+
+
+@pytest.mark.asyncio
+async def test_truncated_html_keeps_markers_but_invalidates_absence() -> None:
+    values = await PageSignalsProbe().collect(_context('<div id="paywall"></div>', truncated=True))
+
+    assert values["human.paywall_detected"].value["detected"] is True
+    assert values["human.paywall_detected"].outcome == ObservationOutcome.OBSERVED
+    assert values["human.captcha_detected"].value is None
+    assert values["human.captcha_detected"].outcome == ObservationOutcome.ERROR
 
 
 @pytest.mark.asyncio

@@ -39,13 +39,16 @@ The current collector:
 - obeys applicable `robots.txt` rules before requesting other paths;
 - discovers and safely classifies one sitemap without recursively crawling it;
 - records homepage availability and response metadata;
+- summarizes the status distribution and HTTP 403/429 frequency across every recorded scan
+  attempt, including redirects and retries;
 - records HTTP protocol and HTTP/3 advertisements, security headers, exact per-response cache
   outcomes when exposed, edge-location hints, and conservative CDN/edge/DNS/hosting attribution;
 - separates explicit challenge/block evidence, bot-management cookie-name fingerprints,
   load-balancer hints, and acceleration headers instead of treating them all as generic WAF use;
 - checks public DNS for a conventional `tollbit.<domain>` gateway without requesting it;
 - records conservative homepage paywall, consent, CAPTCHA, and JavaScript-required markers without
-  claiming to observe rendered state;
+  claiming to observe rendered state, and records HTTP 451 only as a possible geographic or
+  jurisdictional restriction;
 - detects structured metadata, canonical/feed/manifest/OpenSearch links, and bounded candidate
   agent-interface, legal-policy, license, pricing, and registration links in homepage HTML without
   fetching or claiming to verify those candidates;
@@ -59,6 +62,10 @@ The current collector:
   once, and temporarily ceases a domain after repeated transient failures.
 
 It does **not** yet produce an openness score. Score definitions will be added only after the measurement schema, sampling strategy, and validation protocol are documented and tested.
+
+See [the measurement coverage matrix](docs/measurement_coverage.md) for a requirement-by-requirement
+accounting. The operational catalog currently supports 94 of 103 keys, but candidate links and
+probabilistic hints should not be mistaken for completed research measurements.
 
 ## Quick start
 
@@ -131,7 +138,8 @@ For each domain, the implemented HTTP collection sequence is:
 4. Fetch one bounded sitemap, the homepage, and `llms.txt` when allowed and within budget.
 5. Parse HTML, structured declarations, response headers, conservative infrastructure/barrier
    hints, and candidate interface/policy links.
-6. Store and validate an immutable schema `0.2.0` evidence snapshot.
+6. Summarize status outcomes across all recorded HTTP attempts without making another request.
+7. Store and validate an immutable schema `0.2.0` evidence snapshot.
 
 Paywall, consent-wall, CAPTCHA, and JavaScript findings in this HTTP-only stage are conservative
 markup/resource hints, not claims about rendered browser state. Browser comparison, verified

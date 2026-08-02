@@ -6,9 +6,8 @@ from web_openness.models import (
     Evidence,
     Observation,
     ObservationOutcome,
-    RequestRecord,
 )
-from web_openness.probes.base import ProbeContext, observation
+from web_openness.probes.base import ProbeContext, evidence_from_request, observation
 
 SECURITY_HEADERS = (
     "content-security-policy",
@@ -39,7 +38,13 @@ class ResponseProbe:
             return _unknown_response("homepage response was unavailable", outcome=outcome)
 
         attempts = value.attempts or (value.evidence,)
-        evidence = [_evidence_from_attempt(record) for record in attempts]
+        evidence = [
+            evidence_from_request(
+                record,
+                note="HTTP attempt in the homepage redirect/retry chain",
+            )
+            for record in attempts
+        ]
         if value.error is not None or value.status_code is None:
             return _unknown_response(
                 "homepage request did not return a response",
@@ -70,13 +75,29 @@ class ResponseProbe:
         rate_limited_attempts = tuple(record for record in attempts if record.status_code == 429)
         rate_limited = bool(rate_limited_attempts)
         rate_limit_evidence = (
-            [_evidence_from_attempt(record) for record in rate_limited_attempts]
+            [
+                evidence_from_request(
+                    record,
+                    note="HTTP 429 in the homepage redirect/retry chain",
+                )
+                for record in rate_limited_attempts
+            ]
             if rate_limited
             else evidence
         )
+        legal_restriction_attempts = tuple(
+            record for record in attempts if record.status_code == 451
+        )
+        legal_restriction_evidence = [
+            evidence_from_request(
+                record,
+                note="HTTP 451 in the homepage redirect/retry chain",
+            )
+            for record in legal_restriction_attempts
+        ]
 
         return {
-            "network.http_version": _known_or_unknown(
+            "network.http_version": _known_or_no_evidence(
                 http_version,
                 "HTTP protocol reported by the HTTP client",
                 evidence,
@@ -235,6 +256,19 @@ class ResponseProbe:
                 method="HTTP 429 observed in homepage request attempts",
                 evidence=rate_limit_evidence,
             ),
+            "human.geographic_restriction": observation(
+                ({"detected": True, "status": 451} if legal_restriction_attempts else None),
+                confidence=(
+                    Confidence.POSSIBLE if legal_restriction_attempts else Confidence.NO_EVIDENCE
+                ),
+                score=0.6 if legal_restriction_attempts else 1.0,
+                method=(
+                    "HTTP 451 observed; the legal restriction may be geographic or jurisdictional"
+                    if legal_restriction_attempts
+                    else "no HTTP 451 in the homepage request attempts"
+                ),
+                evidence=legal_restriction_evidence or evidence,
+            ),
             "preservation.cache_header_hints": observation(
                 cache,
                 confidence=Confidence.CONFIRMED if cache else Confidence.NO_EVIDENCE,
@@ -367,6 +401,8 @@ def _access_disposition(status: int | None) -> str | None:
         return "forbidden"
     if status == 429:
         return "rate_limited"
+    if status == 451:
+        return "unavailable_for_legal_reasons"
     if 200 <= status < 400:
         return "reachable"
     if 400 <= status < 500:
@@ -374,30 +410,6 @@ def _access_disposition(status: int | None) -> str | None:
     if status >= 500:
         return "server_error"
     return "other_status"
-
-
-def _known_or_unknown(
-    value: object,
-    method: str,
-    evidence: list[Evidence],
-) -> Observation:
-    return observation(
-        value,
-        confidence=Confidence.CONFIRMED if value is not None else Confidence.NO_EVIDENCE,
-        score=1.0 if value is not None else 0.0,
-        method=method,
-        evidence=evidence,
-    )
-
-
-def _evidence_from_attempt(record: RequestRecord) -> Evidence:
-    return Evidence(
-        source_url=record.final_url or record.requested_url,
-        observed_at=record.started_at,
-        http_status=record.status_code,
-        content_sha256=record.content_sha256,
-        note="HTTP attempt in the homepage redirect/retry chain",
-    )
 
 
 def _known_or_no_evidence(
@@ -452,6 +464,7 @@ def _unknown_response(
             "human.authentication_challenge",
             "human.login_required",
             "human.rate_limited",
+            "human.geographic_restriction",
             "preservation.cache_header_hints",
         )
     }

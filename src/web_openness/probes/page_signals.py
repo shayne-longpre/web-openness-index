@@ -6,7 +6,7 @@ from urllib.parse import urljoin, urlsplit
 
 from web_openness.client import FetchResult
 from web_openness.models import Confidence, Evidence, Observation, ObservationOutcome
-from web_openness.probes.base import ProbeContext, observation
+from web_openness.probes.base import ProbeContext, mark_absences_inconclusive, observation
 
 MAX_JSON_LD_CHARS = 100_000
 MAX_NOSCRIPT_CHARS = 4_096
@@ -88,9 +88,11 @@ class PageSignalsHTMLParser(HTMLParser):
         self.license_hrefs: list[str] = []
         self.json_ld_documents: list[str] = []
         self._json_ld_parts: list[str] = []
+        self._json_ld_chars = 0
         self._in_json_ld = False
         self._noscript_depth = 0
         self._noscript_parts: list[str] = []
+        self._noscript_chars = 0
 
     @property
     def noscript_text(self) -> str:
@@ -110,6 +112,7 @@ class PageSignalsHTMLParser(HTMLParser):
         if tag == "script" and values.get("type", "").lower() == "application/ld+json":
             self._in_json_ld = True
             self._json_ld_parts = []
+            self._json_ld_chars = 0
         if tag == "noscript":
             self._noscript_depth += 1
 
@@ -125,10 +128,16 @@ class PageSignalsHTMLParser(HTMLParser):
             self._noscript_depth -= 1
 
     def handle_data(self, data: str) -> None:
-        if self._in_json_ld and sum(map(len, self._json_ld_parts)) < MAX_JSON_LD_CHARS:
-            self._json_ld_parts.append(data)
-        if self._noscript_depth and sum(map(len, self._noscript_parts)) < MAX_NOSCRIPT_CHARS:
-            self._noscript_parts.append(data)
+        if self._in_json_ld:
+            chunk = data[: MAX_JSON_LD_CHARS - self._json_ld_chars]
+            if chunk:
+                self._json_ld_parts.append(chunk)
+                self._json_ld_chars += len(chunk)
+        if self._noscript_depth:
+            chunk = data[: MAX_NOSCRIPT_CHARS - self._noscript_chars]
+            if chunk:
+                self._noscript_parts.append(chunk)
+                self._noscript_chars += len(chunk)
 
     def _record_attribute_markers(self, values: dict[str, str]) -> None:
         haystack = " ".join((values.get("id", ""), values.get("class", ""))).lower()
@@ -181,7 +190,7 @@ class PageSignalsProbe:
             else []
         )
 
-        return {
+        observations = {
             "human.paywall_detected": _possible_detection(
                 paywall_markers,
                 "homepage structured-data declaration or known paywall markup/resource marker",
@@ -217,6 +226,13 @@ class PageSignalsProbe:
                 evidence,
             ),
         }
+        if isinstance(response, FetchResult) and response.truncated:
+            return mark_absences_inconclusive(
+                observations,
+                method="homepage HTML was truncated; absence could not be established",
+                evidence=evidence,
+            )
+        return observations
 
 
 def _possible_detection(
