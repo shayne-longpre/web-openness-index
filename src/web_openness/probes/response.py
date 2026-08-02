@@ -50,6 +50,7 @@ class ResponseProbe:
         security = sorted(key for key in SECURITY_HEADERS if key in headers)
         cache = {key: headers[key] for key in CACHE_HEADERS if key in headers}
         cdn_hints = _cdn_hints(headers)
+        waf_hints = _waf_hints(headers)
         status = value.status_code
         disposition = _access_disposition(status)
         http_version = getattr(value, "http_version", None)
@@ -106,6 +107,16 @@ class ResponseProbe:
                 confidence=Confidence.LIKELY if cdn_hints else Confidence.NO_EVIDENCE,
                 score=0.8 if cdn_hints else 1.0,
                 method="provider-specific homepage headers; provider attribution is probabilistic",
+                evidence=evidence,
+            ),
+            "infrastructure.waf": observation(
+                waf_hints,
+                confidence=Confidence.LIKELY if waf_hints else Confidence.NO_EVIDENCE,
+                score=0.8 if waf_hints else 1.0,
+                method=(
+                    "provider-specific WAF or challenge response headers; "
+                    "not definitive attribution"
+                ),
                 evidence=evidence,
             ),
             "human.http_access_disposition": observation(
@@ -166,6 +177,19 @@ def _cdn_hints(headers: dict[str, str]) -> list[str]:
         hints.add("akamai")
     if "x-served-by" in headers and "fastly" in headers.get("via", "").lower():
         hints.add("fastly")
+    return sorted(hints)
+
+
+def _waf_hints(headers: dict[str, str]) -> list[str]:
+    hints: set[str] = set()
+    if headers.get("cf-mitigated", "").lower() == "challenge":
+        hints.add("cloudflare")
+    if "x-sucuri-id" in headers or "x-sucuri-block" in headers:
+        hints.add("sucuri")
+    if "x-iinfo" in headers or "imperva" in headers.get("x-cdn", "").lower():
+        hints.add("imperva")
+    if "x-wa-info" in headers:
+        hints.add("f5")
     return sorted(hints)
 
 
@@ -248,6 +272,7 @@ def _unknown_response(
             "infrastructure.cache_headers",
             "infrastructure.cdn_hints",
             "infrastructure.cdn",
+            "infrastructure.waf",
             "human.http_access_disposition",
             "human.authentication_challenge",
             "human.login_required",

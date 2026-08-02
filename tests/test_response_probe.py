@@ -65,6 +65,8 @@ async def test_classifies_protocol_security_cache_and_cdn_hints() -> None:
     assert values["infrastructure.cdn_hints"].value == ["cloudflare"]
     assert values["infrastructure.cdn_hints"].confidence == Confidence.LIKELY
     assert values["infrastructure.cdn"].value == ["cloudflare"]
+    assert values["infrastructure.waf"].value == []
+    assert values["infrastructure.waf"].confidence == Confidence.NO_EVIDENCE
     assert values["preservation.cache_header_hints"].value == {
         "cache-control": "public, max-age=60"
     }
@@ -84,6 +86,25 @@ async def test_classifies_authentication_challenge() -> None:
     assert values["human.login_required"].value is True
     assert values["human.rate_limited"].value is False
     assert values["human.rate_limited"].confidence == Confidence.CONFIRMED
+
+
+@pytest.mark.asyncio
+async def test_reports_only_specific_waf_response_hints() -> None:
+    values = await ResponseProbe().collect(
+        _context(
+            403,
+            {
+                "cf-mitigated": "challenge",
+                "x-iinfo": "test",
+                "x-sucuri-id": "test",
+                "x-wa-info": "test",
+            },
+        )
+    )
+
+    finding = values["infrastructure.waf"]
+    assert finding.value == ["cloudflare", "f5", "imperva", "sucuri"]
+    assert finding.confidence == Confidence.LIKELY
 
 
 @pytest.mark.asyncio

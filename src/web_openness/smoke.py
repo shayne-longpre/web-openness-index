@@ -54,6 +54,7 @@ SIGNAL_CATALOG: tuple[SignalSpec, ...] = tuple(
         "infrastructure.cache_headers",
         "infrastructure.cdn_hints",
         "infrastructure.cdn",
+        "infrastructure.waf",
         "crawler.robots_exists",
         "crawler.robots_status",
         "crawler.user_agents",
@@ -70,6 +71,10 @@ SIGNAL_CATALOG: tuple[SignalSpec, ...] = tuple(
         "human.authentication_challenge",
         "human.login_required",
         "human.rate_limited",
+        "human.paywall_detected",
+        "human.cookie_wall_detected",
+        "human.captcha_detected",
+        "human.javascript_required",
         "preservation.cache_header_hints",
         "metadata.sitemap_exists",
         "metadata.sitemap_status",
@@ -96,28 +101,23 @@ SIGNAL_CATALOG: tuple[SignalSpec, ...] = tuple(
         "agent.api_documentation",
         "legal.policy_links",
         "legal.license_links",
+        "legal.license",
         "economic.pricing_links",
         "economic.registration_links",
+        "economic.subscription_required",
         "metadata.llms_txt_exists",
         "metadata.llms_txt_status",
     )
 ) + tuple(
     SignalSpec(key, False)
     for key in (
-        "infrastructure.waf",
         "infrastructure.dns_provider",
         "infrastructure.hosting_provider",
-        "human.paywall_detected",
-        "human.cookie_wall_detected",
-        "human.captcha_detected",
-        "human.javascript_required",
         "crawler.browser_http_difference",
         "legal.scraping_restrictions",
         "legal.ai_restrictions",
-        "legal.license",
         "economic.registration_required",
         "economic.metering",
-        "economic.subscription_required",
         "economic.api_pricing",
         "preservation.archive_coverage",
         "preservation.archive_blocked",
@@ -313,6 +313,29 @@ def render_markdown(run: SmokeRun) -> str:
             f"{_display_signal(domain, 'infrastructure.cdn_hints')} | "
             f"{_display_signal(domain, 'network.tls_version')} | "
             f"{_display_signal(domain, 'network.http_version')} |"
+        )
+
+    lines.extend(
+        [
+            "",
+            "## Access-condition findings",
+            "",
+            "| Domain | Paywall hint | Consent hint | CAPTCHA hint | JavaScript hint | "
+            "License | Subscription | WAF hint |",
+            "| --- | --- | --- | --- | --- | --- | --- | --- |",
+        ]
+    )
+    for domain in run.domains:
+        label = domain.domain or domain.target
+        lines.append(
+            f"| {label} | "
+            f"{_display_signal(domain, 'human.paywall_detected')} | "
+            f"{_display_signal(domain, 'human.cookie_wall_detected')} | "
+            f"{_display_signal(domain, 'human.captcha_detected')} | "
+            f"{_display_signal(domain, 'human.javascript_required')} | "
+            f"{_display_signal(domain, 'legal.license')} | "
+            f"{_display_signal(domain, 'economic.subscription_required')} | "
+            f"{_display_signal(domain, 'infrastructure.waf')} |"
         )
 
     lines.extend(

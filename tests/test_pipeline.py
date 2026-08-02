@@ -11,6 +11,7 @@ from web_openness.pipeline import DomainScanTimedOut, Scanner, normalize_target
 from web_openness.probes import (
     HomepageProbe,
     MetadataProbe,
+    PageSignalsProbe,
     RobotsProbe,
     SitemapProbe,
     WellKnownProbe,
@@ -24,6 +25,7 @@ OFFLINE_HTTP_PROBES = (
     SitemapProbe(),
     HomepageProbe(),
     MetadataProbe(),
+    PageSignalsProbe(),
     WellKnownProbe(),
 )
 
@@ -150,6 +152,9 @@ async def test_scan_collects_evidence_without_live_network(tmp_path: Path) -> No
     assert snapshot.observations["metadata.json_ld"].value is True
     assert snapshot.observations["metadata.open_graph"].value is True
     assert snapshot.observations["metadata.feeds"].value == ["https://example.org/feed.xml"]
+    assert snapshot.observations["human.paywall_detected"].outcome == (
+        ObservationOutcome.NO_EVIDENCE
+    )
     assert snapshot.observations["metadata.llms_txt_exists"].value is True
 
     path = write_snapshot(snapshot, tmp_path)
@@ -176,6 +181,7 @@ async def test_robots_disallow_skips_all_followup_requests() -> None:
     assert homepage.value is None
     assert homepage.confidence == Confidence.UNKNOWN
     assert homepage.outcome == ObservationOutcome.SKIPPED
+    assert snapshot.observations["human.paywall_detected"].outcome == ObservationOutcome.SKIPPED
     assert snapshot.observations["metadata.llms_txt_exists"].value is None
 
 

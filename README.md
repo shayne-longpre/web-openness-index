@@ -40,6 +40,8 @@ The current collector:
 - discovers and safely classifies one sitemap without recursively crawling it;
 - records homepage availability and response metadata;
 - records HTTP protocol, security headers, cache-header hints, and conservative CDN hints;
+- records specific WAF response hints and conservative homepage paywall, consent, CAPTCHA, and
+  JavaScript-required markers without claiming to observe rendered state;
 - detects structured metadata, canonical/feed/manifest/OpenSearch links, and bounded candidate
   agent-interface, legal-policy, license, pricing, and registration links in homepage HTML without
   fetching or claiming to verify those candidates;
@@ -123,11 +125,14 @@ For each domain, the implemented HTTP collection sequence is:
 2. Fetch and parse `robots.txt`.
 3. Apply the effective crawler policy and persistent registrable-domain pacing.
 4. Fetch one bounded sitemap, the homepage, and `llms.txt` when allowed and within budget.
-5. Parse HTML, response headers, infrastructure hints, and candidate interface/policy links.
+5. Parse HTML, structured declarations, response headers, conservative barrier/WAF hints, and
+   candidate interface/policy links.
 6. Store and validate an immutable schema `0.2.0` evidence snapshot.
 
-Browser comparison, verified interface probing, policy-text interpretation, scoring, and
-longitudinal aggregation remain later stages.
+Paywall, consent-wall, CAPTCHA, and JavaScript findings in this HTTP-only stage are conservative
+markup/resource hints, not claims about rendered browser state. Browser comparison, verified
+interface probing, policy-text interpretation, scoring, and longitudinal aggregation remain later
+stages.
 
 The target budget is roughly 5–15 requests per domain. This is domain characterization, not large-scale crawling.
 

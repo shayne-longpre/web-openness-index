@@ -27,13 +27,16 @@ report. Each observation has an explicit outcome:
 
 - **Direct evidence:** DNS and TLS, actual HTTP attempts and protocol, `robots.txt`, bounded
   sitemap structure, homepage status and metadata, security headers, and `llms.txt`.
-- **Conservative hints:** CDN and cache-header hints. Headers do not establish provider
-  attribution or observed cache behavior.
+- **Conservative hints:** CDN/WAF response hints plus known paywall, consent-management, CAPTCHA,
+  and explicit JavaScript-required markup. These do not establish rendered browser state,
+  definitive provider attribution, or observed cache behavior.
+- **Explicit declarations:** `rel=license`, JSON-LD `license`, `isAccessibleForFree`, and
+  `requiresSubscription` values found in the bounded homepage response.
 - **Candidate discovery:** strongly named homepage links for OpenAPI, GraphQL, OAuth, MCP, A2A,
   agent cards, API documentation, legal/license policies, pricing, and registration. Candidates
   are recorded but not fetched or verified.
-- **Not yet supported:** browser-versus-HTTP comparison, visual/JavaScript barriers, authenticated
-  interfaces, policy-text interpretation, archive coverage, and validated cache behavior.
+- **Not yet supported:** browser-versus-HTTP confirmation, authenticated interfaces, policy-text
+  interpretation, archive coverage, and validated cache behavior.
 
 ## Fetch and politeness semantics
 

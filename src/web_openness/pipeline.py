@@ -17,6 +17,7 @@ from web_openness.probes import (
     HomepageProbe,
     MetadataProbe,
     NetworkProbe,
+    PageSignalsProbe,
     ResponseProbe,
     RobotsProbe,
     SitemapProbe,
@@ -32,6 +33,7 @@ DEFAULT_PROBES: tuple[Probe, ...] = (
     HomepageProbe(),
     ResponseProbe(),
     MetadataProbe(),
+    PageSignalsProbe(),
     WellKnownProbe(),
 )
 

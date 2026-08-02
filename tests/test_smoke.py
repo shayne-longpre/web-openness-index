@@ -124,7 +124,10 @@ async def test_smoke_run_preserves_top_level_failure(tmp_path: Path) -> None:
     assert result.errors == ("ValueError: bad target",)
     assert result.signals["crawler.robots_exists"].status == SignalStatus.ERROR
     assert result.signals["agent.mcp"].status == SignalStatus.ERROR
-    assert result.signals["human.paywall_detected"].status == (SignalStatus.NOT_YET_SUPPORTED)
+    assert result.signals["human.paywall_detected"].status == SignalStatus.ERROR
+    assert result.signals["crawler.browser_http_difference"].status == (
+        SignalStatus.NOT_YET_SUPPORTED
+    )
 
 
 def test_reports_are_machine_readable_and_human_readable(tmp_path: Path) -> None:
@@ -149,6 +152,7 @@ def test_reports_are_machine_readable_and_human_readable(tmp_path: Path) -> None
     assert payload["status_counts"]["not_yet_supported"] > 0
     assert "## Diagnostic gaps" in markdown
     assert "## Selected findings" in markdown
+    assert "## Access-condition findings" in markdown
     assert "1 scan notes" in markdown
     assert "homepage: offline fixture failure" in markdown
     assert "`infrastructure.cdn`" in markdown

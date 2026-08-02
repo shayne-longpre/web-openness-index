@@ -226,7 +226,7 @@ Logs must avoid response bodies, credentials, cookies, and unnecessary query str
 - Budgeted and delayed HTTP client
 - Persistent pacing, bounded transient retry, circuit breaking, and robots crawl-delay handling
 - Restart-safe SQLite batch jobs with leases, deferrals, progress, and stop controls
-- DNS/TLS, robots, sitemap, homepage, metadata, and `llms.txt` probes
+- DNS/TLS, robots, sitemap, homepage, metadata, page-signal, response-hint, and `llms.txt` probes
 - Public scanner identity, cease-list enforcement, and deployment safeguards
 - Immutable local JSON output
 - Offline test suite and CI
@@ -237,9 +237,9 @@ Exit criterion: a clean checkout can pass all checks and produce a policy-compli
 ### Phase 1: research MVP
 
 - Versioned domain registry and sampling strata
-- Headers, CDN/WAF, DNS-provider, hosting-provider, and HTTP-protocol probes
+- DNS-provider, hosting-provider, and deeper HTTP-protocol probes
 - Playwright worker for browser-versus-HTTP and screenshot evidence
-- Fixture-based validation for login, paywall, cookie-wall, CAPTCHA, and JavaScript signals
+- Browser validation for login, paywall, cookie-wall, CAPTCHA, and JavaScript signals
 - Parquet export and DuckDB analysis notebooks/scripts
 - Documented scoring proposal, sensitivity analysis, and release manifest
 
