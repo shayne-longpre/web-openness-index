@@ -54,15 +54,19 @@ it is also used to select the applicable `robots.txt` group.
 
 ## Optional browser worker
 
-HTTP collection should remain the default. Browser collection is enabled only for a separately
-deployed adapter implementing `BrowserWorker` and using `BrowserRequestGate` before every main-frame,
-subresource, redirect, worker, and service-worker request.
+HTTP collection remains the default. Install the `browser` extra plus Chromium, then pass
+`--browser` to run one Playwright render per domain. `BrowserPolicy` defaults to disabled and caps
+wall time, total requests, third-party requests, bytes per response, and total transferred bytes.
 
-`BrowserPolicy` defaults to disabled. When enabled, it caps wall time, total requests, third-party
-requests, bytes per response, and total transferred bytes. The adapter must abort streaming at the
-byte limits, use a fresh context with no stored cookies, disable downloads and extensions, and never
-interact with authentication, consent, CAPTCHA, checkout, or form controls. A gate rejection is an
-observation, not permission to retry through another address.
+The integrated adapter creates a fresh context, blocks service workers and downloads, checks every
+request destination, applies the cease list to resource hosts, applies the target robots policy to
+same-site paths, and blocks cross-site top-level navigation. It never clicks, types, submits forms,
+or interacts with authentication, consent, CAPTCHA, or checkout controls. Chromium transfer events
+enforce and report response-byte limits; the production egress boundary remains necessary because
+application callbacks are not a substitute for network isolation.
+
+The adapter boundary remains injectable through `BrowserWorker`, so a production deployment can run
+the same contract in an ephemeral container without changing probes or stored evidence.
 
 ## First deployment gate
 

@@ -62,13 +62,13 @@ Every probe should:
 - distinguish negative findings, absent evidence, skipped work, and failures;
 - be deterministic for a fixed response fixture.
 
-Future probes fall into four worker classes:
+Probe execution falls into four worker classes:
 
 | Worker class | Examples | Isolation need |
 | --- | --- | --- |
 | DNS/TLS | Resolver, certificate, protocol support | Lightweight async process |
 | HTTP | Robots, homepage, well-known files, API discovery | Lightweight async process |
-| Browser | JavaScript requirement, cookie wall, CAPTCHA, rendered screenshot | Sandboxed browser process |
+| Browser | HTTP/render comparison and visible barrier markers; screenshots later | Sandboxed browser process |
 | Document analysis | Terms, licenses, API documentation | CPU/model worker with strict provenance |
 
 ### Evidence store and catalog
@@ -228,6 +228,7 @@ Logs must avoid response bodies, credentials, cookies, and unnecessary query str
 - Restart-safe SQLite batch jobs with leases, deferrals, progress, and stop controls
 - DNS/TLS, robots, sitemap, homepage, metadata, page-signal, response-hint, and `llms.txt` probes
 - Bounded CNAME/NS/SOA metadata, DNS/edge/hosting hints, and conventional TollBit gateway discovery
+- Opt-in, bounded Playwright render with HTTP comparison and visible barrier markers
 - Public scanner identity, cease-list enforcement, and deployment safeguards
 - Immutable local JSON output
 - Offline test suite and CI
@@ -238,8 +239,8 @@ Exit criterion: a clean checkout can pass all checks and produce a policy-compli
 ### Phase 1: research MVP
 
 - Versioned domain registry and sampling strata
-- Playwright worker for browser-versus-HTTP and screenshot evidence
-- Browser validation for login, paywall, cookie-wall, CAPTCHA, and JavaScript signals
+- Screenshot evidence with an explicit retention and redaction policy
+- Validated classifiers for login, paywall, cookie-wall, CAPTCHA, and JavaScript signals
 - Parquet export and DuckDB analysis notebooks/scripts
 - Documented scoring proposal, sensitivity analysis, and release manifest
 

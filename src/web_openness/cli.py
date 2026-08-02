@@ -5,6 +5,7 @@ import signal
 from collections.abc import Sequence
 from pathlib import Path
 
+from web_openness.browser_policy import BrowserPolicy
 from web_openness.config import DEFAULT_USER_AGENT, ScanConfig
 from web_openness.models import DomainSnapshot
 from web_openness.pipeline import Scanner
@@ -112,6 +113,11 @@ def _add_scan_options(parser: argparse.ArgumentParser) -> None:
         type=Path,
         help="canonical domains excluded before DNS, TLS, HTTP, or browser work",
     )
+    parser.add_argument(
+        "--browser",
+        action="store_true",
+        help="enable one bounded, non-interactive Chromium render per domain",
+    )
 
 
 async def run_scans(args: argparse.Namespace) -> list[tuple[DomainSnapshot, Path]]:
@@ -134,6 +140,7 @@ def _scan_config(args: argparse.Namespace) -> ScanConfig:
         max_politeness_wait_seconds=args.max_politeness_wait,
         max_response_bytes=args.max_response_bytes,
         cease_list_path=args.cease_list,
+        browser_policy=BrowserPolicy(enabled=args.browser),
     )
 
 

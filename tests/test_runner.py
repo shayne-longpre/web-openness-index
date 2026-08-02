@@ -358,12 +358,14 @@ def test_batch_cli_surface() -> None:
     parser = build_parser()
 
     batch = parser.parse_args(["batch", "--domains-file", "domains.txt", "--concurrency", "2"])
+    browser_scan = parser.parse_args(["scan", "example.org", "--browser"])
     status = parser.parse_args(["batch-status", "run-123"])
     stop = parser.parse_args(["batch-stop", "run-123"])
     stop_all = parser.parse_args(["batch-stop-all"])
 
     assert batch.command == "batch"
     assert batch.concurrency == 2
+    assert browser_scan.browser is True
     assert status.run_id == "run-123"
     assert stop.command == "batch-stop"
     assert stop_all.command == "batch-stop-all"

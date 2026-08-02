@@ -8,12 +8,14 @@ from uuid import uuid4
 import httpx
 
 from web_openness import __version__
+from web_openness.browser_policy import BrowserWorker
 from web_openness.client import RequestBudgetExceeded, SiteClient
 from web_openness.config import ScanConfig
 from web_openness.domains import canonical_hostname
 from web_openness.governance import CeaseList
 from web_openness.models import DomainSnapshot, Observation, ProbeError
 from web_openness.probes import (
+    BrowserProbe,
     DNSMetadataProbe,
     HomepageProbe,
     MetadataProbe,
@@ -37,6 +39,7 @@ DEFAULT_PROBES: tuple[Probe, ...] = (
     ResponseProbe(),
     MetadataProbe(),
     PageSignalsProbe(),
+    BrowserProbe(),
     WellKnownProbe(),
 )
 
@@ -80,10 +83,12 @@ class Scanner:
         *,
         probes: Iterable[Probe] = DEFAULT_PROBES,
         transport: httpx.AsyncBaseTransport | None = None,
+        browser_worker: BrowserWorker | None = None,
     ) -> None:
         self.config = config or ScanConfig()
         self.probes = tuple(probes)
         self.transport = transport
+        self.browser_worker = browser_worker
         self.cease_list = (
             CeaseList.load(self.config.cease_list_path)
             if self.config.cease_list_path is not None
@@ -92,12 +97,12 @@ class Scanner:
 
     def require_target_allowed(self, target: str) -> None:
         domain, _origin = normalize_target(target)
-        cease_list = (
-            CeaseList.load(self.config.cease_list_path)
-            if self.config.cease_list_path is not None
-            else self.cease_list
-        )
-        cease_list.require_allowed(domain)
+        self._current_cease_list().require_allowed(domain)
+
+    def _current_cease_list(self) -> CeaseList:
+        if self.config.cease_list_path is not None:
+            return CeaseList.load(self.config.cease_list_path)
+        return self.cease_list
 
     async def scan(self, target: str) -> DomainSnapshot:
         return (await self.scan_outcome(target)).snapshot
@@ -113,7 +118,8 @@ class Scanner:
 
     async def _scan_outcome(self, target: str) -> ScanOutcome:
         domain, origin = normalize_target(target)
-        self.require_target_allowed(target)
+        cease_list = self._current_cease_list()
+        cease_list.require_allowed(domain)
         await validate_public_url(
             origin,
             resolve_dns=not isinstance(self.transport, httpx.MockTransport),
@@ -127,7 +133,10 @@ class Scanner:
                 origin=origin,
                 config=self.config,
                 client=client,
+                shared={"cease_list": cease_list},
             )
+            if self.browser_worker is not None:
+                context.shared["browser_worker"] = self.browser_worker
             for probe in self.probes:
                 try:
                     probe_observations = await probe.collect(context)

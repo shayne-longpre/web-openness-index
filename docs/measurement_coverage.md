@@ -5,21 +5,21 @@ the collector emits direct evidence or a deliberately conservative inference. �
 emits a candidate or hint but cannot yet establish the full research claim. A missing signal is
 never converted to `false`.
 
-The operational catalog currently has **94 implemented keys out of 103**. That ratio describes
+The operational catalog currently has **102 implemented keys out of 110**. That ratio describes
 software coverage, not completion of the research program: several implemented keys are
 supporting metadata or explicitly probabilistic hints.
 
-At the original Priority-1 requirement-group level, the current HTTP/DNS collector has **22 fully
-implemented, 7 partial, and 1 not yet supported**. The partial measurements are the seven human
-barrier types that still need rendered-browser confirmation; the missing measurement is the
-browser-versus-HTTP comparison.
+At the original Priority-1 requirement-group level, the collector has **23 fully implemented, 7
+partial, and 0 not yet supported**. Browser-versus-HTTP comparison is now implemented. Human barrier
+classification remains partial: the renderer can confirm visible high-precision login, paywall,
+consent, and CAPTCHA markers, but it does not interact with or attempt to bypass them.
 
 ## Priority 1
 
 | Area | Implemented | Partial | Not yet supported |
 | --- | --- | --- | --- |
-| Human access | HTTP homepage reachability | Login, soft/hard paywalls, cookie walls, CAPTCHAs, geographic restriction, JavaScript requirement | Rendered confirmation for every barrier subtype |
-| Crawler access | `robots.txt`, AI-agent rules, crawl delay, user-agent targeting, sitemap discovery, scan-wide HTTP status distribution, 403 rate, 429 rate | — | Browser-versus-HTTP comparison |
+| Human access | HTTP and browser homepage reachability; visible rendered login, paywall, consent, and CAPTCHA markers | Active/soft/hard barrier classification, geographic restriction, JavaScript requirement | — |
+| Crawler access | `robots.txt`, AI-agent rules, crawl delay, user-agent targeting, sitemap discovery, scan-wide HTTP status distribution, 403 rate, 429 rate, browser-versus-HTTP comparison | — | — |
 | Infrastructure | DNS and hosting hints, CDN/edge hints, explicit WAF/challenge hints, TLS, HTTP version | Exact vendor product and feature configuration is intentionally not inferred without direct evidence | — |
 | Public metadata | JSON-LD/Schema.org types, Open Graph, RSS/Atom/JSON Feed links, sitemap, `robots.txt`, `llms.txt` | — | — |
 
@@ -39,6 +39,6 @@ labels rather than being promoted to facts.
 
 ## Interpretation
 
-The HTTP/DNS collector is suitable for a bounded pilot and missingness analysis. It is not yet
-sufficient for a defensible openness index: browser validation, detector validation sets,
-sampling, scoring, and longitudinal release methodology remain research gates.
+The collector is suitable for a bounded pilot and missingness analysis. The optional browser pass
+closes the HTTP/render comparison gap, but a defensible openness index still requires detector
+validation sets, sampling, scoring, and a longitudinal release methodology.

@@ -100,8 +100,19 @@ The tests use deterministic mock HTTP responses and do not contact live websites
 The collector publishes a neutral [scanner identity and opt-out process](docs/scanner.md). Before
 sustained live collection, review the [deployment checklist](docs/deployment.md), load a canonical
 cease list, and deploy the [RFC 9511 attribution template](deploy/scanner-site/README.md).
-Application checks do not replace production network egress controls. No browser runtime is
-integrated; browser-dependent signals remain unsupported.
+Application checks do not replace production network egress controls. HTTP collection remains the
+default. To enable the optional, non-interactive Chromium pass:
+
+```bash
+uv sync --extra browser
+uv run playwright install chromium
+uv run web-openness scan example.org --browser --json
+```
+
+The browser pass uses a fresh context, keeps the same public identity and robots decision, blocks
+cross-site top-level redirects, and does not click, type, submit forms, or retain page content.
+Its requests and transferred bytes are reported under `browser.network_summary` rather than mixed
+into the direct HTTP request budget.
 
 To run the small diagnostic canary and produce a JSON plus Markdown coverage report:
 
@@ -135,16 +146,18 @@ For each domain, the implemented HTTP collection sequence is:
 1. Resolve and validate the target, then collect bounded public DNS metadata.
 2. Fetch and parse `robots.txt`.
 3. Apply the effective crawler policy and persistent registrable-domain pacing.
-4. Fetch one bounded sitemap, the homepage, and `llms.txt` when allowed and within budget.
+4. Fetch one bounded sitemap and the homepage when allowed and within budget.
 5. Parse HTML, structured declarations, response headers, conservative infrastructure/barrier
    hints, and candidate interface/policy links.
-6. Summarize status outcomes across all recorded HTTP attempts without making another request.
-7. Store and validate an immutable schema `0.2.0` evidence snapshot.
+6. Optionally render the homepage once to compare HTTP and browser access, record bounded rendered
+   metadata, and identify visible high-precision barrier markers.
+7. Fetch `llms.txt`, summarize all recorded HTTP outcomes, and store an immutable schema `0.2.0`
+   evidence snapshot.
 
-Paywall, consent-wall, CAPTCHA, and JavaScript findings in this HTTP-only stage are conservative
-markup/resource hints, not claims about rendered browser state. Browser comparison, verified
-interface probing, policy-text interpretation, scoring, and longitudinal aggregation remain later
-stages.
+HTTP paywall, consent-wall, CAPTCHA, and JavaScript findings remain conservative markup/resource
+hints. Optional browser findings report visible selectors, not a claim that a barrier is active or
+impossible to bypass. Verified interface probing, policy-text interpretation, screenshots, scoring,
+and longitudinal aggregation remain later stages.
 
 The target HTTP budget is roughly 5–15 requests per domain. DNS metadata uses six concurrent,
 bounded lookups and is reported separately from the HTTP request count. This is domain

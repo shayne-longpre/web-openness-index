@@ -1,7 +1,9 @@
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from urllib.parse import urlsplit
+
+from web_openness.browser_policy import BrowserPolicy
 
 DEFAULT_SCANNER_PAGE_URL = "https://github.com/shayne-longpre/web-openness-index"
 DEFAULT_CONTACT_URI = "https://github.com/shayne-longpre/web-openness-index/issues"
@@ -78,6 +80,7 @@ class ScanConfig:
     circuit_failure_threshold: int = 2
     circuit_cooldown_seconds: float = 300.0
     cease_list_path: Path | None = None
+    browser_policy: BrowserPolicy = field(default_factory=BrowserPolicy)
 
     def __post_init__(self) -> None:
         if not self.user_agent.strip():

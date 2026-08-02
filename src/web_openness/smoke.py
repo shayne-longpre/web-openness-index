@@ -83,6 +83,10 @@ SIGNAL_CATALOG: tuple[SignalSpec, ...] = tuple(
         "crawler.http_status_distribution",
         "crawler.http_403_frequency",
         "crawler.http_429_frequency",
+        "crawler.browser_http_difference",
+        "browser.navigation",
+        "browser.rendered_document",
+        "browser.network_summary",
         "human.homepage_accessible",
         "human.homepage_status",
         "human.homepage_final_url",
@@ -96,6 +100,10 @@ SIGNAL_CATALOG: tuple[SignalSpec, ...] = tuple(
         "human.cookie_wall_detected",
         "human.captcha_detected",
         "human.javascript_required",
+        "human.browser_login_marker_visible",
+        "human.browser_paywall_marker_visible",
+        "human.browser_cookie_wall_marker_visible",
+        "human.browser_captcha_marker_visible",
         "preservation.cache_header_hints",
         "metadata.sitemap_exists",
         "metadata.sitemap_status",
@@ -133,7 +141,6 @@ SIGNAL_CATALOG: tuple[SignalSpec, ...] = tuple(
 ) + tuple(
     SignalSpec(key, False)
     for key in (
-        "crawler.browser_http_difference",
         "legal.scraping_restrictions",
         "legal.ai_restrictions",
         "economic.registration_required",
@@ -357,6 +364,28 @@ def render_markdown(run: SmokeRun) -> str:
             f"{_display_signal(domain, 'legal.license')} | "
             f"{_display_signal(domain, 'economic.subscription_required')} | "
             f"{_display_signal(domain, 'infrastructure.waf')} |"
+        )
+
+    lines.extend(
+        [
+            "",
+            "## Browser findings",
+            "",
+            "| Domain | Navigation | HTTP comparison | Login marker | Paywall marker | "
+            "Consent marker | CAPTCHA marker |",
+            "| --- | --- | --- | --- | --- | --- | --- |",
+        ]
+    )
+    for domain in run.domains:
+        label = domain.domain or domain.target
+        lines.append(
+            f"| {label} | "
+            f"{_display_signal(domain, 'browser.navigation')} | "
+            f"{_display_signal(domain, 'crawler.browser_http_difference')} | "
+            f"{_display_signal(domain, 'human.browser_login_marker_visible')} | "
+            f"{_display_signal(domain, 'human.browser_paywall_marker_visible')} | "
+            f"{_display_signal(domain, 'human.browser_cookie_wall_marker_visible')} | "
+            f"{_display_signal(domain, 'human.browser_captcha_marker_visible')} |"
         )
 
     lines.extend(

@@ -13,6 +13,9 @@ uv run web-openness smoke \
   --concurrency 3
 ```
 
+Add `--browser` only after installing the optional runtime and reviewing its tighter per-domain
+request and transfer limits.
+
 Successful scans write immutable schema `0.2.0` snapshots under `data/snapshots/`. The command
 also writes JSON and Markdown coverage reports under `data/smoke-runs/` and prints the compact
 report. Each observation has an explicit outcome:
@@ -28,7 +31,8 @@ report. Each observation has an explicit outcome:
 - **Direct evidence:** DNS addresses/CNAME/NS/SOA, TLS, actual HTTP attempts and protocol,
   `robots.txt`, bounded sitemap structure, homepage status and metadata, scan-wide status
   distribution and HTTP 403/429 frequencies, security headers, exact response cache outcomes when
-  exposed, and `llms.txt`.
+  exposed, and `llms.txt`. With `--browser`, this also includes navigation status, rendered-document
+  counts, transfer totals, and a direct HTTP/render comparison.
 - **Conservative hints:** CDN, edge, DNS, hosting, bot-management, load-balancer, acceleration, and
   explicit challenge/block evidence plus known paywall, consent-management, CAPTCHA, and explicit
   JavaScript-required markup. HTTP 451 is only a possible geographic or jurisdictional restriction.
@@ -41,8 +45,9 @@ report. Each observation has an explicit outcome:
 - **Candidate discovery:** strongly named homepage links for OpenAPI, GraphQL, OAuth, MCP, A2A,
   agent cards, API documentation, legal/license policies, pricing, and registration. Candidates
   are recorded but not fetched or verified.
-- **Not yet supported:** browser-versus-HTTP confirmation, authenticated interfaces, policy-text
-  interpretation, archive coverage, and validated cache behavior.
+- **Not yet supported:** authenticated interfaces, policy-text interpretation, archive coverage,
+  screenshots, and validated cache behavior. Browser-versus-HTTP confirmation is available only
+  with `--browser`.
 
 ## Fetch and politeness semantics
 
@@ -63,8 +68,8 @@ the bounded inline wait cease/defer follow-up work instead of tying up a worker.
 
 The cease list is checked before DNS, TLS, HTTP, or optional browser-adapter work. Keep both input
 files small and review them before every live run. Application destination checks are useful but
-do not replace the production egress controls described in [deployment.md](deployment.md); no
-browser runtime is integrated in the current collector.
+do not replace the production egress controls described in [deployment.md](deployment.md). Browser
+collection is disabled unless `--browser` is passed and the optional runtime is installed.
 
 For a restart-safe run after the canary is reviewed, use the batch command:
 
