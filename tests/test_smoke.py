@@ -153,6 +153,7 @@ def test_reports_are_machine_readable_and_human_readable(tmp_path: Path) -> None
     assert "## Diagnostic gaps" in markdown
     assert "## Selected findings" in markdown
     assert "## Access-condition findings" in markdown
+    assert "## Infrastructure findings" in markdown
     assert "1 scan notes" in markdown
     assert "homepage: offline fixture failure" in markdown
     assert "`infrastructure.cdn`" in markdown

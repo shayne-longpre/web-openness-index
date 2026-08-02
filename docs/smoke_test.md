@@ -25,11 +25,15 @@ report. Each observation has an explicit outcome:
 
 ## What this run exercises
 
-- **Direct evidence:** DNS and TLS, actual HTTP attempts and protocol, `robots.txt`, bounded
-  sitemap structure, homepage status and metadata, security headers, and `llms.txt`.
-- **Conservative hints:** CDN/WAF response hints plus known paywall, consent-management, CAPTCHA,
-  and explicit JavaScript-required markup. These do not establish rendered browser state,
-  definitive provider attribution, or observed cache behavior.
+- **Direct evidence:** DNS addresses/CNAME/NS/SOA, TLS, actual HTTP attempts and protocol,
+  `robots.txt`, bounded sitemap structure, homepage status and metadata, security headers, exact
+  response cache outcomes when exposed, and `llms.txt`.
+- **Conservative hints:** CDN, edge, DNS, hosting, bot-management, load-balancer, acceleration, and
+  explicit challenge/block evidence plus known paywall, consent-management, CAPTCHA, and explicit
+  JavaScript-required markup. Provider attribution remains probabilistic, and a single response
+  does not establish a site's complete product configuration or general cache behavior.
+- **Conventional discovery:** bounded public DNS queries for `tollbit.<domain>`; a record is not a
+  claim that TollBit enforcement is active on every path.
 - **Explicit declarations:** `rel=license`, JSON-LD `license`, `isAccessibleForFree`, and
   `requiresSubscription` values found in the bounded homepage response.
 - **Candidate discovery:** strongly named homepage links for OpenAPI, GraphQL, OAuth, MCP, A2A,
@@ -43,6 +47,11 @@ report. Each observation has an explicit outcome:
 The default budget is eight actual HTTP attempts per scan. Redirect hops and the optional retry
 each consume budget and remain in the snapshot. If an initial HTTP 429 is followed by a successful
 retry, both attempts remain evidence and rate limiting is still reported.
+
+Public DNS metadata uses six concurrent bounded lookups per domain: homepage CNAME, registrable
+domain NS and SOA, and A/CNAME/NS for `tollbit.<domain>`. An A-only TollBit candidate is ignored
+because it cannot be distinguished reliably from wildcard hosting. These lookups do not consume
+the HTTP budget.
 
 Pacing state is persisted in `data/politeness.sqlite3` by registrable domain, so sibling hosts and
 later runs share the same interval. The collector applies the effective `robots.txt`

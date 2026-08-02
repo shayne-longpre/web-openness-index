@@ -40,6 +40,9 @@ SIGNAL_CATALOG: tuple[SignalSpec, ...] = tuple(
         "network.dns_address_count",
         "network.dns_ip_families",
         "network.dns_addresses_truncated",
+        "network.dns_canonical_name",
+        "network.dns_nameservers",
+        "network.dns_soa_primary",
         "network.tls_handshake",
         "network.tls_version",
         "network.tls_cipher",
@@ -54,7 +57,21 @@ SIGNAL_CATALOG: tuple[SignalSpec, ...] = tuple(
         "infrastructure.cache_headers",
         "infrastructure.cdn_hints",
         "infrastructure.cdn",
+        "infrastructure.edge_response_hints",
         "infrastructure.waf",
+        "infrastructure.challenge_response",
+        "infrastructure.cache_status",
+        "infrastructure.edge_location_hints",
+        "infrastructure.http3_advertised",
+        "infrastructure.content_encoding",
+        "infrastructure.response_cookie_fingerprints",
+        "infrastructure.bot_management_hints",
+        "infrastructure.load_balancer_hints",
+        "infrastructure.acceleration_hints",
+        "infrastructure.edge_provider",
+        "infrastructure.edge_service_hints",
+        "infrastructure.dns_provider",
+        "infrastructure.hosting_provider",
         "crawler.robots_exists",
         "crawler.robots_status",
         "crawler.user_agents",
@@ -99,6 +116,7 @@ SIGNAL_CATALOG: tuple[SignalSpec, ...] = tuple(
         "agent.a2a",
         "agent.agent_card",
         "agent.api_documentation",
+        "agent.tollbit_gateway",
         "legal.policy_links",
         "legal.license_links",
         "legal.license",
@@ -111,8 +129,6 @@ SIGNAL_CATALOG: tuple[SignalSpec, ...] = tuple(
 ) + tuple(
     SignalSpec(key, False)
     for key in (
-        "infrastructure.dns_provider",
-        "infrastructure.hosting_provider",
         "crawler.browser_http_difference",
         "legal.scraping_restrictions",
         "legal.ai_restrictions",
@@ -336,6 +352,32 @@ def render_markdown(run: SmokeRun) -> str:
             f"{_display_signal(domain, 'legal.license')} | "
             f"{_display_signal(domain, 'economic.subscription_required')} | "
             f"{_display_signal(domain, 'infrastructure.waf')} |"
+        )
+
+    lines.extend(
+        [
+            "",
+            "## Infrastructure findings",
+            "",
+            "| Domain | DNS edge | Response edge | DNS | Hosting | Cache outcome | HTTP/3 | "
+            "Bot management | Load balancer | Acceleration | TollBit gateway |",
+            "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
+        ]
+    )
+    for domain in run.domains:
+        label = domain.domain or domain.target
+        lines.append(
+            f"| {label} | "
+            f"{_display_signal(domain, 'infrastructure.edge_provider')} | "
+            f"{_display_signal(domain, 'infrastructure.edge_response_hints')} | "
+            f"{_display_signal(domain, 'infrastructure.dns_provider')} | "
+            f"{_display_signal(domain, 'infrastructure.hosting_provider')} | "
+            f"{_display_signal(domain, 'infrastructure.cache_status')} | "
+            f"{_display_signal(domain, 'infrastructure.http3_advertised')} | "
+            f"{_display_signal(domain, 'infrastructure.bot_management_hints')} | "
+            f"{_display_signal(domain, 'infrastructure.load_balancer_hints')} | "
+            f"{_display_signal(domain, 'infrastructure.acceleration_hints')} | "
+            f"{_display_signal(domain, 'agent.tollbit_gateway')} |"
         )
 
     lines.extend(

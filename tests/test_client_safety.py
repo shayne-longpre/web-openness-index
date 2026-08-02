@@ -89,14 +89,25 @@ async def test_public_redirect_preserves_bounded_evidence() -> None:
 
     def handler(request: httpx.Request) -> httpx.Response:
         if request.url.path == "/start":
-            return httpx.Response(302, headers={"location": "/final"}, request=request)
+            return httpx.Response(
+                302,
+                headers=[
+                    ("location", "/final"),
+                    ("set-cookie", "__cf_bm=redirect-secret; Secure; HttpOnly"),
+                ],
+                request=request,
+            )
         return httpx.Response(
             200,
-            headers={
-                "content-language": "en",
-                "server-timing": long_header,
-                "x-ignored": "not stored",
-            },
+            headers=[
+                ("content-language", "en"),
+                ("server-timing", long_header),
+                ("x-ignored", "not stored"),
+                ("cf-mitigated", "challenge"),
+                ("x-iinfo", "example"),
+                ("set-cookie", "BIGipServerPool=final-secret; Secure"),
+                ("set-cookie", "ordinary_session=also-secret; Secure"),
+            ],
             text="ok",
             extensions={"http_version": b"HTTP/2"},
             request=request,
@@ -113,7 +124,13 @@ async def test_public_redirect_preserves_bounded_evidence() -> None:
     assert result.http_version == "HTTP/2"
     assert result.headers["content-language"] == "en"
     assert len(result.headers["server-timing"]) == MAX_STORED_HEADER_CHARS
+    assert result.headers["cf-mitigated"] == "challenge"
+    assert result.headers["x-iinfo"] == "example"
     assert "x-ignored" not in result.headers
+    assert "set-cookie" not in result.headers
+    assert result.cookie_names == ("__cf_bm", "BIGipServerPool", "ordinary_session")
+    assert "redirect-secret" not in repr(result)
+    assert "final-secret" not in repr(result)
     assert [record.requested_url for record in client.records] == [
         "https://example.org/start",
         "https://example.org/final",

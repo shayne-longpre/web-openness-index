@@ -18,7 +18,9 @@ is in [`deploy/scanner-site`](../deploy/scanner-site/README.md).
 
 ## What the collector does
 
-- resolves the submitted hostname and performs a TLS handshake when applicable;
+- resolves the submitted hostname, collects bounded public CNAME/NS/SOA metadata, and performs a
+  TLS handshake when applicable;
+- checks A/CNAME/NS records for the conventional `tollbit.<domain>` name without requesting it;
 - fetches `robots.txt`, then honors the applicable policy before follow-up HTTP requests;
 - fetches at most one sitemap, the homepage, and `llms.txt` when policy permits;
 - limits requests, redirects, elapsed time, and response bytes;

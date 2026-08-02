@@ -1,3 +1,4 @@
+from web_openness.probes.dns_metadata import DNSMetadataProbe
 from web_openness.probes.homepage import HomepageProbe
 from web_openness.probes.metadata import MetadataProbe
 from web_openness.probes.network import NetworkProbe
@@ -8,6 +9,7 @@ from web_openness.probes.sitemap import SitemapProbe
 from web_openness.probes.well_known import WellKnownProbe
 
 __all__ = [
+    "DNSMetadataProbe",
     "HomepageProbe",
     "MetadataProbe",
     "NetworkProbe",

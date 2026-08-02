@@ -14,6 +14,7 @@ from web_openness.domains import canonical_hostname
 from web_openness.governance import CeaseList
 from web_openness.models import DomainSnapshot, Observation, ProbeError
 from web_openness.probes import (
+    DNSMetadataProbe,
     HomepageProbe,
     MetadataProbe,
     NetworkProbe,
@@ -28,6 +29,7 @@ from web_openness.safety import validate_public_url
 
 DEFAULT_PROBES: tuple[Probe, ...] = (
     NetworkProbe(),
+    DNSMetadataProbe(),
     RobotsProbe(),
     SitemapProbe(),
     HomepageProbe(),

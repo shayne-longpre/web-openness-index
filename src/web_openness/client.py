@@ -1,5 +1,6 @@
 import asyncio
 import hashlib
+import re
 import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, replace
@@ -14,14 +15,23 @@ from web_openness.safety import URLSafetyError, validate_public_url
 
 STORED_HEADERS = {
     "age",
+    "akamai-grn",
+    "alt-svc",
     "cache-control",
+    "cdn-cache-control",
+    "cf-apo-via",
+    "cf-mitigated",
     "cf-ray",
     "cf-cache-status",
+    "cloudflare-cdn-cache-control",
+    "content-encoding",
     "content-language",
     "content-length",
     "content-security-policy",
     "content-type",
     "date",
+    "etag",
+    "last-modified",
     "link",
     "permissions-policy",
     "referrer-policy",
@@ -29,16 +39,26 @@ STORED_HEADERS = {
     "server",
     "server-timing",
     "strict-transport-security",
+    "surrogate-control",
     "via",
+    "vary",
     "www-authenticate",
     "x-akamai-transformed",
     "x-amz-cf-id",
     "x-cache",
+    "x-cdn",
     "x-content-type-options",
     "x-frame-options",
+    "x-iinfo",
     "x-served-by",
+    "x-sucuri-block",
+    "x-sucuri-id",
+    "x-wa-info",
 }
 MAX_STORED_HEADER_CHARS = 4_096
+MAX_COOKIE_NAMES = 50
+MAX_COOKIE_NAME_CHARS = 128
+_COOKIE_NAME = re.compile(r"[!#$%&'*+.^_`|~0-9A-Za-z-]+\Z")
 
 
 class RequestBudgetExceeded(RuntimeError):
@@ -57,6 +77,7 @@ class FetchResult:
     error: str | None
     evidence: RequestRecord
     attempts: tuple[RequestRecord, ...] = ()
+    cookie_names: tuple[str, ...] = ()
     deferred_until: datetime | None = None
 
     @property
@@ -148,6 +169,7 @@ class SiteClient:
         redirects_followed = 0
         transient_retries = 0
         attempts: list[RequestRecord] = []
+        cookie_names: set[str] = set()
 
         while True:
             if len(self.records) >= self.config.request_budget:
@@ -158,7 +180,11 @@ class SiteClient:
             safety_error = await self._safety_error(current_url)
             if safety_error is not None:
                 result = self._rejected_result(url, current_url, safety_error)
-                return replace(result, attempts=tuple(attempts))
+                return replace(
+                    result,
+                    attempts=tuple(attempts),
+                    cookie_names=tuple(sorted(cookie_names, key=str.lower)),
+                )
 
             domain_key = politeness_key(current_url)
             pacing_rejection = await self._apply_persistent_pacing(domain_key)
@@ -172,10 +198,15 @@ class SiteClient:
                     pacing_rejection.error,
                     deferred_until=pacing_rejection.deferred_until,
                 )
-                return replace(result, attempts=tuple(attempts))
+                return replace(
+                    result,
+                    attempts=tuple(attempts),
+                    cookie_names=tuple(sorted(cookie_names, key=str.lower)),
+                )
 
             outcome = await self._fetch_once(url, current_url)
             attempts.append(outcome.result.evidence)
+            cookie_names.update(outcome.result.cookie_names)
             if outcome.transient:
                 retry_delay = outcome.retry_after_seconds
                 if retry_delay is None:
@@ -192,19 +223,28 @@ class SiteClient:
                     or len(self.records) >= self.config.request_budget
                     or retry_delay > self.config.max_politeness_wait_seconds
                 ):
-                    return replace(outcome.result, attempts=tuple(attempts))
+                    return replace(
+                        outcome.result,
+                        attempts=tuple(attempts),
+                        cookie_names=tuple(sorted(cookie_names, key=str.lower)),
+                    )
                 transient_retries += 1
                 continue
 
             if outcome.result.error is None:
                 await self._require_politeness_store().record_success(domain_key)
             if outcome.result.error is not None or outcome.next_url is None:
-                return replace(outcome.result, attempts=tuple(attempts))
+                return replace(
+                    outcome.result,
+                    attempts=tuple(attempts),
+                    cookie_names=tuple(sorted(cookie_names, key=str.lower)),
+                )
             if redirects_followed >= self.config.max_redirects:
                 return replace(
                     outcome.result,
                     error=f"TooManyRedirects: exceeded {self.config.max_redirects} redirects",
                     attempts=tuple(attempts),
+                    cookie_names=tuple(sorted(cookie_names, key=str.lower)),
                 )
 
             redirects_followed += 1
@@ -224,6 +264,7 @@ class SiteClient:
         final_url: str | None = None
         http_version: str | None = None
         response_headers: dict[str, str] = {}
+        cookie_names: tuple[str, ...] = ()
         body = bytearray()
         truncated = False
         error: str | None = None
@@ -246,6 +287,7 @@ class SiteClient:
                     for key, value in response.headers.items()
                     if key.lower() in STORED_HEADERS
                 }
+                cookie_names = _extract_cookie_names(response.headers.get_list("set-cookie"))
                 async for chunk in response.aiter_bytes():
                     remaining = self.config.max_response_bytes - len(body)
                     if remaining <= 0:
@@ -287,6 +329,7 @@ class SiteClient:
                 error=error,
                 evidence=record,
                 attempts=(record,),
+                cookie_names=cookie_names,
             ),
             next_url=next_url,
             transient=transient,
@@ -370,6 +413,22 @@ class SiteClient:
             evidence=record,
             deferred_until=deferred_until,
         )
+
+
+def _extract_cookie_names(headers: list[str]) -> tuple[str, ...]:
+    names: set[str] = set()
+    for header in headers:
+        name, separator, _value = header.partition("=")
+        candidate = name.strip()
+        if (
+            separator
+            and len(candidate) <= MAX_COOKIE_NAME_CHARS
+            and _COOKIE_NAME.fullmatch(candidate)
+        ):
+            names.add(candidate)
+        if len(names) >= MAX_COOKIE_NAMES:
+            break
+    return tuple(sorted(names, key=str.lower))
 
 
 def _latest_datetime(first: datetime | None, second: datetime) -> datetime:

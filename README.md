@@ -34,14 +34,18 @@ This repository contains a working HTTP measurement collector and a lean persist
 The current collector:
 
 - normalizes a domain into a reproducible scan target;
-- records bounded DNS resolution and TLS negotiation evidence;
+- records bounded DNS resolution, CNAME, nameserver, SOA, and TLS negotiation evidence;
 - fetches `robots.txt` with a transparent user agent;
 - obeys applicable `robots.txt` rules before requesting other paths;
 - discovers and safely classifies one sitemap without recursively crawling it;
 - records homepage availability and response metadata;
-- records HTTP protocol, security headers, cache-header hints, and conservative CDN hints;
-- records specific WAF response hints and conservative homepage paywall, consent, CAPTCHA, and
-  JavaScript-required markers without claiming to observe rendered state;
+- records HTTP protocol and HTTP/3 advertisements, security headers, exact per-response cache
+  outcomes when exposed, edge-location hints, and conservative CDN/edge/DNS/hosting attribution;
+- separates explicit challenge/block evidence, bot-management cookie-name fingerprints,
+  load-balancer hints, and acceleration headers instead of treating them all as generic WAF use;
+- checks public DNS for a conventional `tollbit.<domain>` gateway without requesting it;
+- records conservative homepage paywall, consent, CAPTCHA, and JavaScript-required markers without
+  claiming to observe rendered state;
 - detects structured metadata, canonical/feed/manifest/OpenSearch links, and bounded candidate
   agent-interface, legal-policy, license, pricing, and registration links in homepage HTML without
   fetching or claiming to verify those candidates;
@@ -121,12 +125,12 @@ The command prints a run ID. Inspect, stop, or resume it with `batch-status`, `b
 
 For each domain, the implemented HTTP collection sequence is:
 
-1. Resolve and validate the target.
+1. Resolve and validate the target, then collect bounded public DNS metadata.
 2. Fetch and parse `robots.txt`.
 3. Apply the effective crawler policy and persistent registrable-domain pacing.
 4. Fetch one bounded sitemap, the homepage, and `llms.txt` when allowed and within budget.
-5. Parse HTML, structured declarations, response headers, conservative barrier/WAF hints, and
-   candidate interface/policy links.
+5. Parse HTML, structured declarations, response headers, conservative infrastructure/barrier
+   hints, and candidate interface/policy links.
 6. Store and validate an immutable schema `0.2.0` evidence snapshot.
 
 Paywall, consent-wall, CAPTCHA, and JavaScript findings in this HTTP-only stage are conservative
@@ -134,7 +138,9 @@ markup/resource hints, not claims about rendered browser state. Browser comparis
 interface probing, policy-text interpretation, scoring, and longitudinal aggregation remain later
 stages.
 
-The target budget is roughly 5–15 requests per domain. This is domain characterization, not large-scale crawling.
+The target HTTP budget is roughly 5–15 requests per domain. DNS metadata uses six concurrent,
+bounded lookups and is reported separately from the HTTP request count. This is domain
+characterization, not large-scale crawling.
 
 ## Confidence and evidence
 
