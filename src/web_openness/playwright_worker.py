@@ -11,6 +11,7 @@ from web_openness.browser_policy import (
 )
 from web_openness.safety import URLSafetyError
 
+
 MARKER_SELECTORS: dict[str, tuple[str, ...]] = {
     "login": (
         'form[action*="login" i]',
@@ -40,6 +41,7 @@ MARKER_SELECTORS: dict[str, tuple[str, ...]] = {
     ),
 }
 
+
 _VISIBLE_MARKERS_SCRIPT = """
 selectors => {
   const visible = element => {
@@ -48,15 +50,19 @@ selectors => {
     return style.display !== "none" && style.visibility !== "hidden" &&
       style.opacity !== "0" && rect.width > 0 && rect.height > 0;
   };
+
   const result = {};
+
   for (const [category, categorySelectors] of Object.entries(selectors)) {
     result[category] = categorySelectors.filter(selector =>
       Array.from(document.querySelectorAll(selector)).some(visible)
     );
   }
+
   return result;
 }
 """
+
 
 _DOCUMENT_COUNTS_SCRIPT = """
 () => ({
@@ -72,6 +78,7 @@ class PlaywrightBrowserWorker:
     def __init__(self, *, user_agent: str, settle_milliseconds: int = 500) -> None:
         if settle_milliseconds < 0:
             raise ValueError("settle_milliseconds must not be negative")
+
         self.user_agent = user_agent
         self.settle_milliseconds = settle_milliseconds
 
@@ -83,7 +90,7 @@ class PlaywrightBrowserWorker:
         try:
             from playwright.async_api import Error as PlaywrightError
             from playwright.async_api import Route, async_playwright
-        except ImportError as exc:  # pragma: no cover - depends on optional installation.
+        except ImportError as exc:  # pragma: no cover
             raise BrowserPolicyError(
                 "browser collection requires the 'browser' optional dependency"
             ) from exc
@@ -97,7 +104,8 @@ class PlaywrightBrowserWorker:
                 browser = await playwright.chromium.launch(headless=True)
             except PlaywrightError as exc:
                 raise BrowserPolicyError(
-                    "Chromium is unavailable; install it with 'playwright install chromium'"
+                    "Chromium is unavailable; install it with "
+                    "'playwright install chromium'"
                 ) from exc
 
             context = await browser.new_context(
@@ -107,25 +115,41 @@ class PlaywrightBrowserWorker:
                 user_agent=self.user_agent,
                 viewport={"width": 1280, "height": 720},
             )
+
             page = await context.new_page()
 
             def stop_for_transfer_limit(error: BrowserPolicyError) -> None:
                 nonlocal transfer_error, close_task
+
                 if transfer_error is None:
                     transfer_error = error
                     close_task = asyncio.create_task(page.close())
 
             session = await context.new_cdp_session(page)
             await session.send("Network.enable")
-            await session.send("Network.setCacheDisabled", {"cacheDisabled": True})
+            await session.send(
+                "Network.setCacheDisabled",
+                {"cacheDisabled": True},
+            )
 
             def record_transfer(params: dict[str, Any]) -> None:
                 response_id = params.get("requestId")
-                encoded_length = params.get("encodedDataLength") or params.get("dataLength")
-                if not isinstance(response_id, str) or not isinstance(encoded_length, (int, float)):
+                encoded_length = (
+                    params.get("encodedDataLength")
+                    or params.get("dataLength")
+                )
+
+                if not isinstance(response_id, str):
                     return
+
+                if not isinstance(encoded_length, (int, float)):
+                    return
+
                 try:
-                    request_gate.record_response_chunk(response_id, int(encoded_length))
+                    request_gate.record_response_chunk(
+                        response_id,
+                        int(encoded_length),
+                    )
                 except BrowserPolicyError as exc:
                     stop_for_transfer_limit(exc)
 
@@ -134,10 +158,18 @@ class PlaywrightBrowserWorker:
             def reconcile_transfer(params: dict[str, Any]) -> None:
                 response_id = params.get("requestId")
                 encoded_length = params.get("encodedDataLength")
-                if not isinstance(response_id, str) or not isinstance(encoded_length, (int, float)):
+
+                if not isinstance(response_id, str):
                     return
+
+                if not isinstance(encoded_length, (int, float)):
+                    return
+
                 try:
-                    request_gate.record_response_total(response_id, int(encoded_length))
+                    request_gate.record_response_total(
+                        response_id,
+                        int(encoded_length),
+                    )
                 except BrowserPolicyError as exc:
                     stop_for_transfer_limit(exc)
 
@@ -145,11 +177,14 @@ class PlaywrightBrowserWorker:
 
             async def route_request(route: Route) -> None:
                 nonlocal blocked_requests
+
                 request = route.request
                 top_level_navigation = False
+
                 if request.is_navigation_request():
                     with suppress(PlaywrightError):
                         top_level_navigation = request.frame == page.main_frame
+
                 try:
                     await request_gate.authorize(
                         request.url,
@@ -157,35 +192,72 @@ class PlaywrightBrowserWorker:
                     )
                 except (BrowserPolicyError, URLSafetyError):
                     blocked_requests += 1
-                    await route.abort("blockedbyclient")
+
+                    # The page may close before the request can be aborted.
+                    with suppress(PlaywrightError):
+                        await route.abort("blockedbyclient")
+
                     return
-                await route.continue_()
+
+                try:
+                    await route.continue_()
+                except PlaywrightError:
+                    # If the page was intentionally closed because the
+                    # transfer limit was reached, this request is no longer
+                    # relevant and should not crash the scan.
+                    if page.is_closed() or transfer_error is not None:
+                        return
+
+                    # Preserve unexpected Playwright errors.
+                    raise
 
             await context.route("**/*", route_request)
+
             response = None
+
             try:
-                response = await page.goto(target_url, wait_until="domcontentloaded")
+                response = await page.goto(
+                    target_url,
+                    wait_until="domcontentloaded",
+                )
+
                 if self.settle_milliseconds:
                     await page.wait_for_timeout(self.settle_milliseconds)
+
                 if transfer_error is not None:
                     raise transfer_error
 
                 final_url = page.url
                 parsed_final_url = urlsplit(final_url)
+
                 if (
                     parsed_final_url.scheme not in {"http", "https"}
                     or parsed_final_url.hostname is None
                 ):
-                    raise BrowserPolicyError("browser navigation ended on a non-web error page")
+                    raise BrowserPolicyError(
+                        "browser navigation ended on a non-web error page"
+                    )
 
-                raw_markers = await page.evaluate(_VISIBLE_MARKERS_SCRIPT, MARKER_SELECTORS)
+                raw_markers = await page.evaluate(
+                    _VISIBLE_MARKERS_SCRIPT,
+                    MARKER_SELECTORS,
+                )
                 markers = _normalize_markers(raw_markers)
-                raw_counts = await page.evaluate(_DOCUMENT_COUNTS_SCRIPT)
+
+                raw_counts = await page.evaluate(
+                    _DOCUMENT_COUNTS_SCRIPT,
+                )
                 document_chars, visible_text_chars = _normalize_counts(raw_counts)
+
                 title = (await page.title()).strip()[:500] or None
+
                 return BrowserRender(
                     final_url=final_url,
-                    status_code=response.status if response is not None else None,
+                    status_code=(
+                        response.status
+                        if response is not None
+                        else None
+                    ),
                     title=title,
                     document_chars=document_chars,
                     visible_text_chars=visible_text_chars,
@@ -193,37 +265,86 @@ class PlaywrightBrowserWorker:
                     observed_at=datetime.now(UTC),
                     blocked_request_count=blocked_requests,
                 )
+
             except PlaywrightError as exc:
                 if transfer_error is not None:
                     raise transfer_error from exc
+
                 message = " ".join(str(exc).split())[:300]
-                raise BrowserPolicyError(f"browser navigation failed: {message}") from exc
+                raise BrowserPolicyError(
+                    f"browser navigation failed: {message}"
+                ) from exc
+
             finally:
                 if close_task is not None:
-                    await asyncio.gather(close_task, return_exceptions=True)
-                await context.close()
-                await browser.close()
+                    await asyncio.gather(
+                        close_task,
+                        return_exceptions=True,
+                    )
+
+                # Stop new route callbacks before closing the context.
+                with suppress(PlaywrightError):
+                    await context.unroute_all(
+                        behavior="ignoreErrors",
+                    )
+
+                with suppress(PlaywrightError):
+                    await context.close()
+
+                with suppress(PlaywrightError):
+                    await browser.close()
 
 
-def _normalize_markers(value: object) -> dict[str, tuple[str, ...]]:
+def _normalize_markers(
+    value: object,
+) -> dict[str, tuple[str, ...]]:
     if not isinstance(value, dict):
-        raise BrowserPolicyError("browser marker result had an invalid shape")
+        raise BrowserPolicyError(
+            "browser marker result had an invalid shape"
+        )
+
     raw = cast(dict[object, object], value)
     markers: dict[str, tuple[str, ...]] = {}
+
     for category in MARKER_SELECTORS:
         selected = raw.get(category, [])
-        if not isinstance(selected, list) or not all(isinstance(item, str) for item in selected):
-            raise BrowserPolicyError("browser marker result had an invalid shape")
-        markers[category] = tuple(sorted(cast(list[str], selected)))
+
+        if not isinstance(selected, list):
+            raise BrowserPolicyError(
+                "browser marker result had an invalid shape"
+            )
+
+        if not all(isinstance(item, str) for item in selected):
+            raise BrowserPolicyError(
+                "browser marker result had an invalid shape"
+            )
+
+        markers[category] = tuple(
+            sorted(cast(list[str], selected))
+        )
+
     return markers
 
 
 def _normalize_counts(value: object) -> tuple[int, int]:
     if not isinstance(value, dict):
-        raise BrowserPolicyError("browser document result had an invalid shape")
+        raise BrowserPolicyError(
+            "browser document result had an invalid shape"
+        )
+
     raw = cast(dict[object, object], value)
+
     document_chars = raw.get("documentChars")
     visible_text_chars = raw.get("visibleTextChars")
-    if not isinstance(document_chars, int) or not isinstance(visible_text_chars, int):
-        raise BrowserPolicyError("browser document result had an invalid shape")
+
+    if not isinstance(document_chars, int):
+        raise BrowserPolicyError(
+            "browser document result had an invalid shape"
+        )
+
+    if not isinstance(visible_text_chars, int):
+        raise BrowserPolicyError(
+            "browser document result had an invalid shape"
+        )
+
     return max(0, document_chars), max(0, visible_text_chars)
